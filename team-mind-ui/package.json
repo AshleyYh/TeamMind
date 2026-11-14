@@ -1,0 +1,6 @@
+{
+  "name": "team-mind-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vue 3 workspace reserved for Phase 8. No frontend implementation in Phase 1."
+}

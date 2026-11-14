@@ -1,0 +1,71 @@
+# Local environment and secrets (keep .env.example as the safe template)
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.p12
+*.jks
+
+# Java / Maven build output
+target/
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+!.mvn/wrapper/maven-wrapper.jar
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+# IDE and editor settings
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+*.swp
+*.swo
+*~
+
+# Frontend dependencies and build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+coverage/
+.nuxt/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime, logs and temporary files
+logs/
+*.log
+*.tmp
+*.temp
+.attach_pid*
+hs_err_pid*
+replay_pid*
+
+# OS metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini

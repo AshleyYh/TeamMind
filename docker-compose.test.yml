@@ -1,0 +1,43 @@
+name: team-mind-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: teammind
+      POSTGRES_USER: teammind
+      POSTGRES_PASSWORD: teammind_it_password
+    ports:
+      - "15432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teammind -d teammind"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.0
+    ports:
+      - "16333:6333"
+      - "16334:6334"
+    tmpfs:
+      - /qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6333/healthz || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

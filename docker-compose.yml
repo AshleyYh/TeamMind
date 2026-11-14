@@ -1,0 +1,61 @@
+name: team-mind
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: team-mind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-teammind}
+      POSTGRES_USER: ${POSTGRES_USER:-teammind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teammind_local_password}
+      TZ: Asia/Shanghai
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: team-mind-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.0
+    container_name: team-mind-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:
