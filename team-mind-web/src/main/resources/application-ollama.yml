@@ -1,0 +1,21 @@
+# 本地 Ollama 模式：通过 OpenAI 兼容接口接入 Qwen3.5 与 Qwen3-Embedding。
+# 启动时与 local 同时激活：--spring.profiles.active=local,ollama
+teammind:
+  knowledge:
+    vector:
+      # 本地模型与云端 Embedding 属于不同向量空间，必须使用独立集合并重新上传文档。
+      collection: ${OLLAMA_QDRANT_COLLECTION:team_mind_chunks_local_qwen3_1024}
+      dimension: 1024
+      top-k: ${RAG_TOP_K:5}
+      score-threshold: ${RAG_SCORE_THRESHOLD:0.25}
+  ai:
+    qwen:
+      base-url: "${OLLAMA_BASE_URL:http://localhost:11434/v1}"
+      # Ollama 不校验密钥，但 OpenAI 兼容客户端要求非空 Authorization 头。
+      api-key: "${OLLAMA_API_KEY:ollama}"
+      embedding-model: "${OLLAMA_EMBEDDING_MODEL:qwen3-embedding:0.6b}"
+      embedding-dimension: 1024
+      chat-model: "${OLLAMA_CHAT_MODEL:qwen3.5:9b}"
+      connect-timeout: 5s
+      # 本地首次回答包含模型加载时间，适当放宽读取超时。
+      read-timeout: ${OLLAMA_READ_TIMEOUT:180s}

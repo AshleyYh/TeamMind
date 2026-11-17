@@ -16,10 +16,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Opt-in real-service verification. Run scripts/verify-infrastructure.sh after
- * starting the isolated test stack in docker-compose.test.yml.
- */
+/** 真实基础设施验证：启动隔离测试环境后，通过 scripts/verify-infrastructure.sh 执行。 */
 @Tag("integration")
 @SpringBootTest
 @ActiveProfiles("integration")
@@ -48,10 +45,14 @@ class InfrastructureIntegrationTests {
                 "knowledge_chunk", "ai_conversation", "ai_memory", "ai_trace",
                 "ai_trace_span", "ai_evidence");
 
-        // A second migration on the same database must not execute V1 again.
+        List<String> indexes = jdbcTemplate.queryForList(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'", String.class);
+        assertThat(indexes).contains("uk_document_active_name", "uk_knowledge_base_owner_name_active");
+
+        // 同一数据库重复迁移不能再次执行历史脚本。
         var result = flyway.migrate();
         assertThat(result.migrationsExecuted).isZero();
-        assertThat(flyway.info().applied()).hasSize(1);
+        assertThat(flyway.info().applied()).hasSize(2);
     }
 
     @Test

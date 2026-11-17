@@ -1,17 +1,1 @@
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:15432/teammind_test
-    username: teammind
-    password: teammind_test
-  data:
-    redis:
-      port: 16379
-
-teammind:
-  qdrant:
-    port: 16334
-
-management:
-  health:
-    qdrant:
-      enabled: false
+# 测试专用配置位于团队的 src/test/resources 目录，不随生产 JAR 发布。

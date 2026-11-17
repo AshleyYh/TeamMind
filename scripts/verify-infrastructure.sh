@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 if ! command -v docker >/dev/null 2>&1; then
-    echo "Docker is required for real infrastructure integration tests." >&2
+    echo "真实基础设施集成测试需要 Docker。" >&2
     exit 1
 fi
 

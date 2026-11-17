@@ -1,4 +1,4 @@
-# Local environment and secrets (keep .env.example as the safe template)
+# 本地环境变量与密钥；保留 .env.example 作为安全模板
 .env
 .env.*
 !.env.example
@@ -8,7 +8,7 @@
 *.p12
 *.jks
 
-# Java / Maven build output
+# Java 与 Maven 构建产物
 target/
 **/target/
 *.class
@@ -24,7 +24,7 @@ dependency-reduced-pom.xml
 buildNumber.properties
 .mvn/timing.properties
 
-# IDE and editor settings
+# IDE 与编辑器配置
 .idea/
 *.iml
 *.ipr
@@ -38,7 +38,7 @@ buildNumber.properties
 *.swo
 *~
 
-# Frontend dependencies and build output
+# 前端依赖与构建产物
 node_modules/
 **/node_modules/
 dist/
@@ -52,7 +52,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Runtime, logs and temporary files
+# 运行时数据、上传文档、日志与临时文件
+data/
+team-mind-web/data/
+
 logs/
 *.log
 *.tmp
@@ -61,7 +64,7 @@ logs/
 hs_err_pid*
 replay_pid*
 
-# OS metadata
+# 操作系统元数据
 .DS_Store
 .DS_Store?
 ._*

@@ -56,7 +56,7 @@ class GlobalExceptionHandlerTests {
                         .content("{not-json}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ErrorCode.MALFORMED_REQUEST.getCode()))
-                .andExpect(jsonPath("$.message").value("Malformed request"));
+                .andExpect(jsonPath("$.message").value(ErrorCode.MALFORMED_REQUEST.getMessage()));
     }
 
     @SpringBootApplication

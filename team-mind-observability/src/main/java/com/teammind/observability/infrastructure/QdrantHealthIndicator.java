@@ -37,7 +37,7 @@ public class QdrantHealthIndicator implements HealthIndicator {
     }
 
     private Health unavailable(Exception exception) {
-        // Do not expose credentials, request payloads or remote exception messages.
+        // 健康响应不暴露凭据、请求内容或远程异常报文。
         return Health.down()
                 .withDetail("connection", "gRPC healthCheck failed")
                 .withDetail("error", rootCauseType(exception).getSimpleName())

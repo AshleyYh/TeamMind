@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
@@ -14,8 +15,11 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -58,10 +62,30 @@ public class GlobalExceptionHandler {
                 .toList(), request);
     }
 
-    @ExceptionHandler({MissingServletRequestParameterException.class, MethodArgumentTypeMismatchException.class})
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    ResponseEntity<ApiResponse<Void>> handleMethodValidation(
+            HandlerMethodValidationException exception, HttpServletRequest request) {
+        return response(ErrorCode.VALIDATION_FAILED, "请求参数校验失败", request);
+    }
+
+    @ExceptionHandler({MissingServletRequestParameterException.class, MissingServletRequestPartException.class,
+            MethodArgumentTypeMismatchException.class})
     ResponseEntity<ApiResponse<Void>> handleInvalidParameter(
             Exception exception, HttpServletRequest request) {
-        return response(ErrorCode.VALIDATION_FAILED, "Invalid request parameter", request);
+        return response(ErrorCode.VALIDATION_FAILED, "请求参数缺失或格式不正确", request);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiResponse<Void>> handleUploadTooLarge(HttpServletRequest request) {
+        return response(ErrorCode.PAYLOAD_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE.getMessage(), request);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ResponseEntity<ApiResponse<Void>> handleDataConflict(
+            DataIntegrityViolationException exception, HttpServletRequest request) {
+        // 数据库约束细节可能包含表名和字段名，只记录异常类型并向客户端返回稳定的冲突错误。
+        log.warn("数据库约束冲突：path={}", request.getRequestURI());
+        return response(ErrorCode.CONFLICT, "数据已存在或违反唯一约束", request);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

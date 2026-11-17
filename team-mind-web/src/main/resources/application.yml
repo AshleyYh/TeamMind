@@ -84,7 +84,7 @@ management:
 info:
   application:
     name: TeamMind
-    phase: Phase 1 - Foundation
+    phase: Phase 2 - Basic RAG
 
 teammind:
   qdrant:
@@ -94,6 +94,28 @@ teammind:
     use-tls: ${QDRANT_USE_TLS:false}
     request-timeout: ${QDRANT_REQUEST_TIMEOUT:10s}
     health-timeout: ${QDRANT_HEALTH_TIMEOUT:3s}
+  document:
+    storage-path: ${DOCUMENT_STORAGE_PATH:./data/documents}
+    max-file-bytes: ${DOCUMENT_MAX_FILE_BYTES:20971520}
+    chunk-tokens: ${DOCUMENT_CHUNK_TOKENS:640}
+    overlap-tokens: ${DOCUMENT_OVERLAP_TOKENS:100}
+    embedding-batch-size: ${DOCUMENT_EMBEDDING_BATCH_SIZE:10}
+    max-chunks: ${DOCUMENT_MAX_CHUNKS:2000}
+  knowledge:
+    vector:
+      collection: ${QDRANT_COLLECTION:team_mind_chunks}
+      dimension: ${EMBEDDING_DIMENSION:1024}
+      top-k: ${RAG_TOP_K:5}
+      score-threshold: ${RAG_SCORE_THRESHOLD:0.25}
+  ai:
+    qwen:
+      base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      api-key: ${QWEN_API_KEY:}
+      embedding-model: ${QWEN_EMBEDDING_MODEL:text-embedding-v4}
+      embedding-dimension: ${EMBEDDING_DIMENSION:1024}
+      chat-model: ${QWEN_CHAT_MODEL:qwen-plus}
+      connect-timeout: ${QWEN_CONNECT_TIMEOUT:5s}
+      read-timeout: ${QWEN_READ_TIMEOUT:60s}
 
 logging:
   level:

@@ -13,6 +13,6 @@ public class OpenApiConfiguration {
         return new OpenAPI().info(new Info()
                 .title("TeamMind API")
                 .version("v1")
-                .description("Phase 1 foundation APIs. RAG, Agent and memory APIs are not implemented yet."));
+                .description("Phase 2 基础 RAG 接口：知识库、文档入库与带引用问答；尚未实现混合检索、Agent 和记忆。"));
     }
 }

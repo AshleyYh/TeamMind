@@ -1292,6 +1292,8 @@ team-mind/
 
 答案可以返回原始文档和 Chunk 引用。
 
+Phase 2 实现与自动化验证记录见 `docs/phase2-verification.md`，当前架构见 `docs/architecture.md`。真实 PostgreSQL、Qdrant 和 Qwen 的最终验收仍需按记录在本机执行。
+
 ## Phase 3：高级 RAG
 
 任务：

@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    # 仅用于装配 MyBatis 的上下文测试；真实数据库链路由 integration profile 验证。
+    url: jdbc:h2:mem:teammind-test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  flyway:
+    enabled: false
+
+management:
+  health:
+    qdrant:
+      enabled: false
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState
