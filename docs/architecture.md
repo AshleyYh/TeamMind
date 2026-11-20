@@ -1,10 +1,10 @@
-# TeamMind 当前架构说明（Phase 2）
+# TeamMind 当前架构说明（Phase 3）
 
 ## 目标与边界
 
-Phase 2 在 Phase 1 的模块化单体上打通基础 RAG：知识库管理、文档上传与解析、异步分块和向量入库、Dense 向量检索、Qwen 问答以及可追溯引用。
+Phase 3 在 Phase 2 的基础上实现高级 RAG：BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、BGE 系列 Reranker、有效版本过滤与 Evidence Board。支持单独执行四种检索策略，问答默认采用混合检索与重排。
 
-本阶段不包含 BM25、RRF、Reranker、Evidence Board、Agent、记忆、流式输出、登录认证和前端页面。对应能力分别属于后续阶段，不能把当前 `ownerId` 参数当作权限系统。
+本阶段不包含 Agent、记忆、完整 Span/Token 追踪、量化评测、SSE、登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数。
 
 ## 模块与依赖
 
@@ -13,72 +13,51 @@ team-mind-web
   -> team-mind-ai
        -> team-mind-system
        -> team-mind-knowledge -> team-mind-common
-       -> team-mind-observability -> team-mind-common
+       -> team-mind-observability -> team-mind-knowledge
   -> team-mind-evaluation -> team-mind-ai
 ```
 
-`knowledge` 负责知识库、文档、解析、分块、向量存储和检索，不依赖 Qwen SDK。`ai` 实现 Embedding 与对话模型网关，并编排 RAG 回答。`observability` 负责 Qdrant 健康指标，后续承载 Trace 与 Evidence。`web` 只包含 Controller、启动类和应用配置。
+`knowledge` 负责文档、向量存储、关键词召回、版本过滤、融合和重排；`ai` 负责模型对话和问答编排；`observability` 负责轻量 RAG Trace 与 Evidence 持久化。`web` 只包含 Controller、启动类和应用配置。
 
-`EmbeddingGateway`、`VectorStoreGateway` 和 `ChatCompletionGateway` 都是端口接口，业务层不直接依赖 Qwen 或 Qdrant 的实现类。`team-mind-ui` 是独立前端工作区，不属于 Maven reactor。
+`EmbeddingGateway`、`VectorStoreGateway`、`ChatCompletionGateway`、`RerankerGateway` 和 `EvidenceRecorder` 都是端口接口。知识检索通过证据端口写入记录，不依赖具体 Mapper；观测模块实现该端口，避免循环依赖。
 
 ## 文档入库链路
 
-```text
-上传请求
-  -> 校验 ownerId、知识库、文件大小、文件名和扩展名
-  -> 保存到本地文档目录
-  -> PostgreSQL 写入文档元数据（PENDING）
-  -> 事务提交后调度异步任务
-       -> 条件更新为 PROCESSING，防止同一文档并发处理
-       -> 清理该文档旧分块与旧向量
-       -> PDFBox/Tika 解析文本
-       -> 按配置分块并保留 PDF 页码
-       -> 分批调用 Embedding
-       -> Qdrant upsert（确定性 Point ID）
-       -> PostgreSQL 写入分块（含 vector_id）
-       -> 标记 COMPLETED
-```
+上传、解析、分块和异步状态沿用 Phase 2。新增步骤为：每个 Chunk 在入库前生成 `search_tokens`，PostgreSQL 同时保存原文与检索词元。英文和数字保留完整词元，代码标识符按非字母数字边界切分，中文生成连续二元词。该方案不依赖外部中文词典，后续可替换为领域词典。
 
-任何步骤失败都会尝试清理该文档向量并标记 `FAILED`；业务错误原因最多保存 500 个字符，未知异常只写日志，避免内部信息通过接口泄漏。重新处理走相同链路，因此可以清理半成功产物。
+Qdrant 保存向量，PostgreSQL 保存元数据、BM25 词元及由词元生成的 `tsvector`。升级前的旧文档必须重处理以补齐检索词元；现有向量无需强制重建。
 
-为支持版本更新，同一知识库内有效文档名称唯一；重传同名文件时文档版本加一。检索时会校验分块版本必须等于文档当前版本，旧版本分块不会作为答案证据。
-
-## 检索与回答链路
+## 高级检索链路
 
 ```text
 用户问题
-  -> 校验知识和知识库归属
-  -> Qwen Embedding
-  -> Qdrant 按知识库过滤的 Dense 检索
-  -> PostgreSQL 读取 Chunk 与当前有效文档
-  -> 丢弃已删除、失败处理、旧版本或不属于所选知识库的结果
-  -> 无证据则直接拒答且不调用对话模型
-  -> 构建带编号、分隔标记的证据上下文
+  -> 校验知识库归属与请求参数
+  -> 按策略选择召回路径
+       -> DENSE：Embedding -> Qdrant -> 有效 Chunk 加载
+       -> BM25：分词 -> PostgreSQL BM25 -> 有效 Chunk 加载
+       -> HYBRID：两路并行 -> RRF -> 有效版本过滤
+       -> HYBRID_RERANK：混合结果 -> Reranker -> 最终 Top K
+  -> 持久化 Evidence（traceId、原文、版本、排名、分数）
+  -> 构建带编号的证据上下文
   -> Qwen Chat
-  -> 校验回答中的引用编号范围
-  -> 返回答案与真实 Chunk 引用
+  -> 校验引用范围并标记实际引用
+  -> 返回答案、真实引用、traceId 和 strategy
 ```
 
-引用由服务端根据检索结果生成，模型不能提交文档 ID 或路径。模型返回不存在的引用编号时整次回答被拒绝。文档名称会做属性转义，证据使用显式分隔标签，系统提示要求忽略证据中的越权指令；这只能降低 Prompt Injection 风险，仍需要后续 Agent 工具权限层。
+BM25 使用 `k1=1.2`、`b=0.75` 与 Robertson IDF。文档频率和平均长度只基于所选知识库中的当前有效分块计算，减少跨知识库统计偏差。候选在 SQL 中限制知识库、文档状态和版本，加载器再次核验当前归属和版本，防止残留向量或并发更新产生过期证据。
 
-## 数据一致性与并发
+RRF 公式为 `Σ 1 / (60 + rank)`，同一 Chunk 的两路排名与原始分数保留在 `RetrievedChunk` 和 Evidence 中；非混合策略不写 RRF 分数。重排使用 DashScope 原生文本 Rerank 协议，推荐 `qwen3.7-text-rerank`，模型只能返回候选索引和分数，不能修改证据。服务层统一丢弃重复、越界与非有限分数。
 
-Qdrant Point ID 来自 `documentId + version + chunkIndex` 的确定性 UUID，重试覆盖同一点而不是追加。删除文档先删除该文档全部向量，再删除数据库分块并逻辑删除文档。若向量库不可用，删除会失败而不会留下“数据库已删除但向量仍可检索”的状态。
+Dense 与 BM25 使用独立有界线程池并行运行并共享一个截止时间。调用超时或失败会显式失败，不静默降级为另一种策略。没有证据时直接返回，不调用对话模型。
 
-上传事务只在提交后触发异步处理，避免任务读不到数据库记录。文档状态用条件更新认领任务，同名文档正在处理时拒绝再次上传。文档处理有独立有界线程池，避免上传高峰无限堆积任务。
+## Evidence 与轻量 Trace
 
-Qdrant 集合在首次入库时创建，并校验已有集合的向量维度与配置一致。集合尚未创建时检索返回空结果；删除不存在的集合按幂等成功处理。向量库异常统一映射为 `50301`，不会向客户端暴露远程报文。
+每次检索或问答返回 32 位十六进制 `traceId`。独立检索（包括无命中）会创建轻量 `ai_trace`，问答则在请求开始时创建并复用同一 ID。Evidence 保存最终 Top K 的原文、版本、页码、两路排名、融合/重排分数和重排标记；只有回答实际出现的 `[编号]` 才设置 `cited=true`。
 
-## 数据库迁移
+Evidence 采用历史原文快照，不因文档重处理或删除而失效。迁移解除旧表对当前文档/Chunk 的删除外键，但创建证据仍必须来自服务端已校验的真实 Chunk。`ai_trace` 当前保存状态、问题、策略、回答和耗时，不提供完整执行节点，完整追踪属于 Phase 6。
 
-Flyway 仍是唯一自动迁移入口。`V2__add_phase2_constraints.sql` 删除不适合同名版本更新的旧约束，增加有效文档名称与有效知识库名称的部分唯一索引。已应用迁移不得修改，后续变更继续新增迁移文件。
+## 配置、安全与限制
 
-`knowledge_chunk.vector_id` 关联 PostgreSQL 分块与 Qdrant Point。旧版本 Chunk 在重新处理时清理，文档删除时同步清理。当前只保存文档当前版本的文件与元数据，不保留可回滚的历史版本快照。
+`RAG_DENSE_CANDIDATE_SIZE`、`RAG_BM25_CANDIDATE_SIZE`、`RAG_RERANK_CANDIDATE_SIZE`、`RAG_RRF_K`、`RAG_PARALLEL_TIMEOUT` 和 `RAG_STRATEGY` 控制检索；`RERANK_*` 控制重排接口，密钥默认复用 `QWEN_API_KEY`。所有外部模型调用具有连接和读取超时，异常转换为稳定的业务错误。
 
-## 配置、安全与已知限制
-
-模型地址、模型名、维度、超时、文件上限、分块参数、批大小和检索参数均可通过环境变量覆盖。QWEN_API_KEY 不写入仓库；`.env` 仅供 Docker Compose，Java 进程需要从运行环境注入密钥。上传文件目录 `data/` 已被 Git 忽略，接口不返回服务器文件路径。
-
-Embedding 与问答客户端使用 OpenAI 兼容协议。除 DashScope 云端 Qwen 外，可通过 `ollama` profile 接入本地 `qwen3.5:9b` 和 `qwen3-embedding:0.6b`，并使用独立 Qdrant 集合隔离本地与云端向量空间；部署步骤见 `docs/local-models.md`。
-
-当前最大限制是没有身份认证：`ownerId` 由客户端显式传入，只能保证知识库归属一致性，不能阻止客户端伪造其他用户 ID。进入正式使用前必须接入登录与授权，并把用户身份从请求参数改为安全上下文。当前也未实现独立权限关联表、文档历史版本回滚、对象存储、病毒扫描、限流和真实 Qwen 计费监控。
+Ollama profile 只覆盖 Chat 与 Embedding；默认混合重排仍需要 DashScope 密钥，或配置兼容的 Reranker 服务。当前没有真实身份认证，也没有文件病毒扫描、限流、对象存储和模型计费监控。具体验证范围和待验收项见 `docs/phase3-verification.md`。

@@ -1,8 +1,8 @@
 # TeamMind
 
-企业级研发知识库 Agent 平台。当前完成 **Phase 2：基础 RAG**，包括知识库管理、PDF/DOCX/TXT/Markdown 入库、异步文档处理、向量检索和带真实引用的问答。BM25、Reranker、Agent、长期记忆和前端业务页面尚未实现。
+企业级研发知识库 Agent 平台。当前完成 **Phase 3：高级 RAG**，包括文档入库、Dense + BM25 并行检索、RRF 融合、BGE 系列 Reranker、有效版本过滤、带真实引用的问答和 Evidence Board。Agent、长期记忆、完整链路追踪和前端业务页面尚未实现。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 2 验收记录](docs/phase2-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 3 验收记录](docs/phase3-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 技术基线
 
@@ -75,7 +75,23 @@ curl -X POST http://localhost:8080/api/v1/chat/completions \
   -d '{"message":"订单模块最大连接数是多少？","knowledgeBaseIds":[知识库ID],"ownerId":1,"topK":5}'
 ```
 
-回答包含 `citations`，每个引用都来自数据库中的真实 Chunk，并携带文档 ID、Chunk ID、版本、页码、原文和相似度。服务端会拒绝模型返回越界引用编号；没有检索证据时不会调用模型，而是返回“没有找到足够依据”。
+回答包含 `citations`、`traceId` 和 `strategy`。每个引用都来自数据库中的真实 Chunk，并携带文档 ID、Chunk ID、版本、页码、原文、Dense/BM25 排名、RRF 与重排分数。服务端会拒绝模型返回越界引用编号；没有检索证据时不会调用模型，而是返回“没有找到足够依据”。
+
+默认策略为 `HYBRID_RERANK`，需要 `QWEN_API_KEY`（或单独的 `RERANK_API_KEY`）。可通过请求中的 `strategy` 改为 `DENSE`、`BM25` 或 `HYBRID`，也可独立调用策略检索：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/retrieval/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"HikariCP 最大连接数","knowledgeBaseIds":[1],"ownerId":1,"topK":5,"strategy":"BM25"}'
+```
+
+按问答返回的 `traceId` 查看证据快照和最终引用状态：
+
+```bash
+curl 'http://localhost:8080/api/v1/evidence/替换为traceId?ownerId=1'
+```
+
+**升级注意：** Phase 2 已入库文档需要逐篇调用重处理接口，补齐 BM25 检索词元后才能参与关键词召回。
 
 ## 接口范围
 
@@ -101,10 +117,10 @@ Phase 2 尚未接入身份认证，请求中的 `ownerId` 是开发阶段的显�
 ./scripts/verify-infrastructure.sh
 ```
 
-该脚本启动 PostgreSQL `15432`、Redis `16379`、Qdrant `16333/16334`，运行基础设施连接、Flyway、HTTP 健康接口以及“PDF 上传→分块→向量入库→检索→带引用回答→删除清理”的 Phase 2 全链路测试。外部模型在集成测试中替换为本地确定性实现，不消耗 Qwen 配额。
+该脚本启动 PostgreSQL `15432`、Redis `16379`、Qdrant `16333/16334`，运行基础设施连接、Flyway、HTTP 健康接口以及“PDF 上传→分块→向量入库→BM25/RRF/重排→带引用回答→Evidence→删除清理”的 Phase 3 全链路测试。外部模型在集成测试中替换为本地确定性实现，不消耗 Qwen 配额。
 
 ## 主要配置
 
-`DB_*`、`REDIS_*`、`QDRANT_*` 控制基础设施连接；`QWEN_API_KEY`、`QWEN_BASE_URL`、`QWEN_EMBEDDING_MODEL`、`QWEN_CHAT_MODEL`、`EMBEDDING_DIMENSION` 控制模型；`DOCUMENT_*` 控制上传、分块和批处理；`RAG_TOP_K` 与 `RAG_SCORE_THRESHOLD` 控制召回范围。完整默认值见 [application.yml](team-mind-web/src/main/resources/application.yml)。
+`DB_*`、`REDIS_*`、`QDRANT_*` 控制基础设施连接；`QWEN_API_KEY`、`QWEN_BASE_URL`、`QWEN_EMBEDDING_MODEL`、`QWEN_CHAT_MODEL`、`EMBEDDING_DIMENSION` 控制模型；`DOCUMENT_*` 控制上传、分块和批处理；`RAG_*` 控制召回数量、策略、RRF 和并行超时；`RERANK_*` 控制重排服务，密钥默认复用 `QWEN_API_KEY`。完整默认值见 [application.yml](team-mind-web/src/main/resources/application.yml)。
 
 上传文件存放在 `./data/documents`，已被 Git 忽略。停止本地基础设施使用 `docker compose down`；只有明确需要删除本地数据时才添加 `--volumes`。

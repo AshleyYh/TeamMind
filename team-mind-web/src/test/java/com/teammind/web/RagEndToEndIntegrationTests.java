@@ -28,7 +28,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Phase 2 真实链路验收：真实 PostgreSQL、Qdrant 与 PDF，仅替换外部模型。 */
+/** Phase 3 真实链路验收：真实 PostgreSQL、Qdrant 与 PDF，仅替换外部模型。 */
 @Tag("integration")
 @SpringBootTest
 @ActiveProfiles("integration")
@@ -61,6 +61,9 @@ class RagEndToEndIntegrationTests {
     @Autowired
     private RagAnswerService ragAnswerService;
 
+    @Autowired
+    private com.teammind.observability.application.EvidenceService evidenceService;
+
     @Test
     void PDF可以完成上传解析分块向量检索并返回真实引用() throws Exception {
         jdbcTemplate.update("""
@@ -86,12 +89,36 @@ class RagEndToEndIntegrationTests {
         assertThat(chunks.getFirst().content()).contains("maximum pool size is 30");
         assertThat(chunks.getFirst().pageNumber()).isEqualTo(1);
 
+        var bm25 = searchService.searchWithTrace("maximum pool size", List.of(knowledgeBase.getId()), OWNER_ID, 3,
+                com.teammind.knowledge.api.SearchStrategy.BM25);
+        assertThat(bm25.chunks()).isNotEmpty();
+        assertThat(bm25.chunks().getFirst().bm25Rank()).isEqualTo(1);
+        assertThat(bm25.chunks().getFirst().bm25Score()).isPositive();
+
+        var hybrid = searchService.searchWithTrace("maximum pool size", List.of(knowledgeBase.getId()), OWNER_ID, 3,
+                com.teammind.knowledge.api.SearchStrategy.HYBRID);
+        assertThat(hybrid.chunks().getFirst().denseRank()).isEqualTo(1);
+        assertThat(hybrid.chunks().getFirst().bm25Rank()).isEqualTo(1);
+        assertThat(hybrid.chunks().getFirst().rrfScore()).isPositive();
+
+        var reranked = searchService.searchWithTrace("maximum pool size", List.of(knowledgeBase.getId()), OWNER_ID, 3,
+                com.teammind.knowledge.api.SearchStrategy.HYBRID_RERANK);
+        assertThat(reranked.chunks().getFirst().rerankScore()).isNotNull();
+
+        assertThat(evidenceService.list(reranked.traceId(), OWNER_ID)).isNotEmpty();
+
         RagAnswerService.RagAnswer answer = ragAnswerService.answer(
                 "What is the maximum pool size?", List.of(knowledgeBase.getId()), OWNER_ID, 3);
         assertThat(answer.answer()).contains("[1]");
         assertThat(answer.citations()).isNotEmpty();
         assertThat(answer.citations().getFirst().documentName()).isEqualTo("order-design.pdf");
         assertThat(answer.citations().getFirst().chunkId()).isEqualTo(chunks.getFirst().chunkId());
+        assertThat(answer.traceId()).hasSize(32);
+        assertThat(evidenceService.list(answer.traceId(), OWNER_ID)).singleElement()
+                .satisfies(evidence -> {
+                    assertThat(evidence.getCited()).isTrue();
+                    assertThat(evidence.getContent()).contains("maximum pool size is 30");
+                });
 
         // 删除后数据库分块和向量必须同时不可检索。
         documentService.delete(completed.getId(), OWNER_ID);

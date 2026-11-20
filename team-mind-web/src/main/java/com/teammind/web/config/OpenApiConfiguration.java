@@ -13,6 +13,6 @@ public class OpenApiConfiguration {
         return new OpenAPI().info(new Info()
                 .title("TeamMind API")
                 .version("v1")
-                .description("Phase 2 基础 RAG 接口：知识库、文档入库与带引用问答；尚未实现混合检索、Agent 和记忆。"));
+                .description("Phase 3 高级 RAG 接口：知识库、文档入库、策略检索、混合重排问答与 Evidence；Agent 和记忆属于后续阶段。"));
     }
 }

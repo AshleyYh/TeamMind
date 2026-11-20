@@ -1,0 +1,44 @@
+package com.teammind.observability.domain;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+import java.time.LocalDateTime;
+
+/** Phase 3 的轻量检索记录；完整 Span 与 Token 追踪由 Phase 6 补充。 */
+@TableName("ai_trace")
+public class RagTrace {
+    @TableId(type = IdType.ASSIGN_ID)
+    private Long id;
+    private String traceId;
+    private Long userId;
+    private String status;
+    private Long totalDuration;
+    private String knowledgeBaseIds;
+    private String query;
+    private String strategy;
+    private String answer;
+    private LocalDateTime createdAt;
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getTraceId() { return traceId; }
+    public void setTraceId(String traceId) { this.traceId = traceId; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public Long getTotalDuration() { return totalDuration; }
+    public void setTotalDuration(Long totalDuration) { this.totalDuration = totalDuration; }
+    public String getKnowledgeBaseIds() { return knowledgeBaseIds; }
+    public void setKnowledgeBaseIds(String knowledgeBaseIds) { this.knowledgeBaseIds = knowledgeBaseIds; }
+    public String getQuery() { return query; }
+    public void setQuery(String query) { this.query = query; }
+    public String getStrategy() { return strategy; }
+    public void setStrategy(String strategy) { this.strategy = strategy; }
+    public String getAnswer() { return answer; }
+    public void setAnswer(String answer) { this.answer = answer; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+}

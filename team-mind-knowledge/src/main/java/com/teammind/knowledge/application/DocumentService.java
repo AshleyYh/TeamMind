@@ -155,8 +155,7 @@ public class DocumentService {
         vectorStore.deleteByDocumentId(documentId);
         chunkMapper.delete(new LambdaQueryWrapper<com.teammind.knowledge.domain.Chunk>()
                 .eq(com.teammind.knowledge.domain.Chunk::getDocumentId, documentId));
-        document.setDeleted(true);
-        document.setUpdatedAt(LocalDateTime.now());
-        documentMapper.updateById(document);
+        // @TableLogic 字段不能通过 updateById 可靠写入，使用框架逻辑删除更新 deleted。
+        documentMapper.deleteById(documentId);
     }
 }

@@ -47,12 +47,17 @@ class InfrastructureIntegrationTests {
 
         List<String> indexes = jdbcTemplate.queryForList(
                 "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'", String.class);
-        assertThat(indexes).contains("uk_document_active_name", "uk_knowledge_base_owner_name_active");
+        assertThat(indexes).contains("uk_document_active_name", "uk_knowledge_base_owner_name_active",
+                "idx_chunk_search_vector", "idx_evidence_owner_trace");
+        List<String> columns = jdbcTemplate.queryForList(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'ai_evidence'", String.class);
+        assertThat(columns).contains("owner_id", "document_name", "content", "dense_rank", "bm25_rank",
+                "rrf_score", "reranked", "cited");
 
         // 同一数据库重复迁移不能再次执行历史脚本。
         var result = flyway.migrate();
         assertThat(result.migrationsExecuted).isZero();
-        assertThat(flyway.info().applied()).hasSize(2);
+        assertThat(flyway.info().applied()).hasSize(3);
     }
 
     @Test

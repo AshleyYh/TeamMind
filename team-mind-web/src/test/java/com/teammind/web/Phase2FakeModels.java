@@ -2,6 +2,7 @@ package com.teammind.web;
 
 import com.teammind.ai.model.ChatCompletionGateway;
 import com.teammind.knowledge.api.EmbeddingGateway;
+import com.teammind.knowledge.api.RerankerGateway;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -31,6 +32,13 @@ public class Phase2FakeModels {
                 return 4;
             }
         };
+    }
+
+    @Bean
+    @Primary
+    RerankerGateway phase3TestRerankerGateway() {
+        return (query, candidates) -> java.util.stream.IntStream.range(0, candidates.size())
+                .mapToObj(index -> new RerankerGateway.RerankResult(index, 1.0 - index * 0.01)).toList();
     }
 
     @Bean

@@ -10,6 +10,7 @@ import com.teammind.knowledge.domain.Chunk;
 import com.teammind.knowledge.domain.Document;
 import com.teammind.knowledge.domain.ProcessingStatus;
 import com.teammind.knowledge.infrastructure.parser.DocumentParserRegistry;
+import com.teammind.knowledge.infrastructure.search.TextTokenizer;
 import com.teammind.knowledge.infrastructure.storage.LocalDocumentStorage;
 import com.teammind.knowledge.mapper.ChunkMapper;
 import com.teammind.knowledge.mapper.DocumentMapper;
@@ -31,18 +32,21 @@ public class DocumentProcessor {
     private final LocalDocumentStorage storage;
     private final DocumentParserRegistry parserRegistry;
     private final TextChunker chunker;
+    private final TextTokenizer tokenizer;
     private final EmbeddingGateway embeddingGateway;
     private final VectorStoreGateway vectorStore;
     private final DocumentProperties properties;
 
     public DocumentProcessor(DocumentMapper documentMapper, ChunkMapper chunkMapper,
             LocalDocumentStorage storage, DocumentParserRegistry parserRegistry, TextChunker chunker,
-            EmbeddingGateway embeddingGateway, VectorStoreGateway vectorStore, DocumentProperties properties) {
+            TextTokenizer tokenizer, EmbeddingGateway embeddingGateway, VectorStoreGateway vectorStore,
+            DocumentProperties properties) {
         this.documentMapper = documentMapper;
         this.chunkMapper = chunkMapper;
         this.storage = storage;
         this.parserRegistry = parserRegistry;
         this.chunker = chunker;
+        this.tokenizer = tokenizer;
         this.embeddingGateway = embeddingGateway;
         this.vectorStore = vectorStore;
         this.properties = properties;
@@ -73,6 +77,7 @@ public class DocumentProcessor {
             }
             List<Chunk> chunks = chunker.chunk(documentId, document.getKnowledgeBaseId(),
                     document.getCurrentVersion(), parsed);
+            chunks.forEach(chunk -> chunk.setSearchTokens(String.join(" ", tokenizer.tokenize(chunk.getContent()))));
             vectorStore.ensureCollection(embeddingGateway.dimension());
             for (int start = 0; start < chunks.size(); start += properties.embeddingBatchSize()) {
                 List<Chunk> batch = chunks.subList(start,

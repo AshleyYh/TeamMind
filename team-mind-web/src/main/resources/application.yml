@@ -84,7 +84,7 @@ management:
 info:
   application:
     name: TeamMind
-    phase: Phase 2 - Basic RAG
+    phase: Phase 3 - Advanced RAG
 
 teammind:
   qdrant:
@@ -107,6 +107,21 @@ teammind:
       dimension: ${EMBEDDING_DIMENSION:1024}
       top-k: ${RAG_TOP_K:5}
       score-threshold: ${RAG_SCORE_THRESHOLD:0.25}
+    retrieval:
+      dense-candidate-size: ${RAG_DENSE_CANDIDATE_SIZE:20}
+      bm25-candidate-size: ${RAG_BM25_CANDIDATE_SIZE:20}
+      rerank-candidate-size: ${RAG_RERANK_CANDIDATE_SIZE:20}
+      default-strategy: ${RAG_STRATEGY:HYBRID_RERANK}
+      rrf-k: ${RAG_RRF_K:60}
+      max-term-count: ${RAG_MAX_TERM_COUNT:64}
+      parallel-timeout: ${RAG_PARALLEL_TIMEOUT:15s}
+    reranker:
+      base-url: ${RERANK_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
+      api-key: ${RERANK_API_KEY:${QWEN_API_KEY:}}
+      model: ${RERANK_MODEL:qwen3.7-text-rerank}
+      instruct: ${RERANK_INSTRUCT:Given a web search query, retrieve relevant passages that answer the query.}
+      connect-timeout: ${RERANK_CONNECT_TIMEOUT:5s}
+      read-timeout: ${RERANK_READ_TIMEOUT:30s}
   ai:
     qwen:
       base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}

@@ -46,7 +46,8 @@ class DocumentProcessorTests {
         when(embedding.dimension()).thenReturn(2);
         when(embedding.embedDocuments(anyList())).thenReturn(List.of(List.of(0.1F, 0.2F)));
         DocumentProcessor processor = new DocumentProcessor(documentMapper, chunkMapper, storage,
-                registry, chunker, embedding, vectors, new DocumentProperties(64, 10, 10, 100, 1000));
+                registry, chunker, new com.teammind.knowledge.infrastructure.search.TextTokenizer(),
+                embedding, vectors, new DocumentProperties(64, 10, 10, 100, 1000));
 
         processor.process(1L, 1);
 
@@ -67,6 +68,7 @@ class DocumentProcessorTests {
         when(documentMapper.selectById(1L)).thenReturn(document());
         DocumentProcessor processor = new DocumentProcessor(documentMapper, mock(ChunkMapper.class),
                 mock(LocalDocumentStorage.class), mock(DocumentParserRegistry.class), mock(TextChunker.class),
+                mock(com.teammind.knowledge.infrastructure.search.TextTokenizer.class),
                 mock(EmbeddingGateway.class), mock(VectorStoreGateway.class),
                 new DocumentProperties(64, 10, 10, 100, 1000));
 

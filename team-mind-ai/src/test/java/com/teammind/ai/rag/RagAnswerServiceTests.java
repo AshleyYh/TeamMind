@@ -20,11 +20,23 @@ class RagAnswerServiceTests {
 
     private final KnowledgeSearchService searchService = mock(KnowledgeSearchService.class);
     private final ChatCompletionGateway chatGateway = mock(ChatCompletionGateway.class);
-    private final RagAnswerService service = new RagAnswerService(searchService, chatGateway);
+    private final com.teammind.knowledge.api.EvidenceRecorder evidenceRecorder =
+            mock(com.teammind.knowledge.api.EvidenceRecorder.class);
+    private final com.teammind.observability.application.RagTraceService traceService =
+            mock(com.teammind.observability.application.RagTraceService.class);
+    private final RagAnswerService service = new RagAnswerService(searchService, chatGateway, evidenceRecorder, traceService);
+
+    {
+        var trace = new com.teammind.observability.domain.RagTrace();
+        trace.setId(99L);
+        org.mockito.Mockito.when(traceService.start(anyString(), any(), anyString(), any(), any())).thenReturn(trace);
+    }
 
     @Test
     void 无证据时不调用模型() {
-        when(searchService.search(anyString(), any(), any(), any())).thenReturn(List.of());
+        when(searchService.searchWithTrace(anyString(), any(), any(), any(), any(), anyString()))
+                .thenReturn(new com.teammind.knowledge.api.RetrievalResult("trace",
+                        com.teammind.knowledge.api.SearchStrategy.HYBRID, List.of()));
 
         var result = service.answer("连接池大小是多少？", List.of(1L), 1L, null);
 
@@ -37,7 +49,9 @@ class RagAnswerServiceTests {
     void 引用只来自真实检索结果() {
         RetrievedChunk chunk = new RetrievedChunk(11L, 22L, 1L, "订单设计.pdf", 2, 0, 3,
                 "最大连接数为30", 0.9);
-        when(searchService.search(anyString(), any(), any(), any())).thenReturn(List.of(chunk));
+        when(searchService.searchWithTrace(anyString(), any(), any(), any(), any(), anyString()))
+                .thenReturn(new com.teammind.knowledge.api.RetrievalResult("trace",
+                        com.teammind.knowledge.api.SearchStrategy.HYBRID, List.of(chunk)));
         when(chatGateway.generate(anyString(), anyString())).thenReturn("最大连接数为30 [1]");
 
         var result = service.answer("最大连接数？", List.of(1L), 1L, 5);
@@ -50,13 +64,17 @@ class RagAnswerServiceTests {
             assertThat(citation.pageNumber()).isEqualTo(3);
         });
         verify(chatGateway).generate(anyString(), org.mockito.ArgumentMatchers.contains("最大连接数为30"));
+        verify(evidenceRecorder).markCitations(org.mockito.ArgumentMatchers.eq(result.traceId()),
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of(11L)));
     }
 
     @Test
     void 拒绝模型返回不存在的引用编号() {
         RetrievedChunk chunk = new RetrievedChunk(11L, 22L, 1L, "订单设计.pdf", 2, 0, 3,
                 "最大连接数为30", 0.9);
-        when(searchService.search(anyString(), any(), any(), any())).thenReturn(List.of(chunk));
+        when(searchService.searchWithTrace(anyString(), any(), any(), any(), any(), anyString()))
+                .thenReturn(new com.teammind.knowledge.api.RetrievalResult("trace",
+                        com.teammind.knowledge.api.SearchStrategy.HYBRID, List.of(chunk)));
         when(chatGateway.generate(anyString(), anyString())).thenReturn("错误引用 [2]");
 
         org.assertj.core.api.Assertions.assertThatThrownBy(

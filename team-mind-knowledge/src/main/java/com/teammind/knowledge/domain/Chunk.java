@@ -15,6 +15,7 @@ public class Chunk {
     private Integer documentVersion;
     private Integer chunkIndex;
     private String content;
+    private String searchTokens;
     private Integer pageNumber;
     private String vectorId;
     private LocalDateTime createdAt;
@@ -31,6 +32,8 @@ public class Chunk {
     public void setChunkIndex(Integer chunkIndex) { this.chunkIndex = chunkIndex; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getSearchTokens() { return searchTokens; }
+    public void setSearchTokens(String searchTokens) { this.searchTokens = searchTokens; }
     public Integer getPageNumber() { return pageNumber; }
     public void setPageNumber(Integer pageNumber) { this.pageNumber = pageNumber; }
     public String getVectorId() { return vectorId; }
