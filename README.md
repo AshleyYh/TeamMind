@@ -4,7 +4,7 @@
 
 Agent 任务规划、长期记忆、完整链路追踪、量化评测和前端业务页面尚未实现。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 3 验收记录](docs/phase3-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 3 验收记录](docs/phase3-verification.md)，接口级逐项验证见 [Phase 3 功能人工验收手册](docs/phase3-manual-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 当前进度
 
@@ -169,6 +169,8 @@ OpenAPI JSON：<http://localhost:8080/api/v1/api-docs>
   "timestamp": "2026-01-01T00:00:00Z"
 }
 ```
+
+MyBatis-Plus 生成的是 19 位雪花编号，超过了 JavaScript 的 `Number.MAX_SAFE_INTEGER`。为避免浏览器和 Swagger UI 四舍五入导致 ID 变化，**所有 `Long` 类型 ID 在响应 JSON 中以字符串返回**，例如 `"id": "2125154842707329025"`；请求中的 ID 字符串和数字都可以被接受。
 
 ### 知识库管理
 

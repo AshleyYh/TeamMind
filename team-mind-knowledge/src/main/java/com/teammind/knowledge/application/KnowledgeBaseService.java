@@ -73,15 +73,14 @@ public class KnowledgeBaseService {
 
     @Transactional
     public void delete(Long id, Long ownerId) {
-        KnowledgeBase knowledgeBase = get(id, ownerId);
+        get(id, ownerId);
         Long count = documentMapper.selectCount(new LambdaQueryWrapper<Document>()
                 .eq(Document::getKnowledgeBaseId, id));
         if (count > 0) {
             throw new BusinessException("知识库中仍有文档，请先删除文档");
         }
-        knowledgeBase.setDeleted(true);
-        knowledgeBase.setUpdatedAt(LocalDateTime.now());
-        knowledgeBaseMapper.updateById(knowledgeBase);
+        // @TableLogic 字段不会出现在 updateById 的 SET 子句中，必须使用框架逻辑删除更新 deleted。
+        knowledgeBaseMapper.deleteById(id);
     }
 
     public List<KnowledgeBase> getAccessible(List<Long> ids, Long ownerId) {

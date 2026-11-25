@@ -50,6 +50,25 @@ class DocumentControllerTests {
     }
 
     @Test
+    void 雪花编号以字符串返回避免前端精度丢失() throws Exception {
+        Document document = new Document();
+        document.setId(2125154842707329025L);
+        document.setKnowledgeBaseId(2125154842707328001L);
+        document.setDocumentName("大编号文档.txt");
+        document.setFileType("txt");
+        document.setCurrentVersion(1);
+        document.setProcessingStatus("COMPLETED");
+        document.setCreatedAt(LocalDateTime.now());
+        document.setUpdatedAt(LocalDateTime.now());
+        when(service.get(anyLong(), anyLong())).thenReturn(document);
+
+        mockMvc.perform(get("/api/v1/documents/2125154842707329025").param("ownerId", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value("2125154842707329025"))
+                .andExpect(jsonPath("$.data.knowledgeBaseId").value("2125154842707328001"));
+    }
+
+    @Test
     void 非正数所有者编号返回参数错误() throws Exception {
         mockMvc.perform(get("/api/v1/documents/1").param("ownerId", "0"))
                 .andExpect(status().isBadRequest())
