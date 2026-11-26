@@ -6,6 +6,7 @@ import com.teammind.knowledge.config.DocumentProperties;
 import com.teammind.knowledge.config.QdrantKnowledgeProperties;
 import com.teammind.knowledge.config.RerankerProperties;
 import com.teammind.knowledge.config.RetrievalProperties;
+import com.teammind.memory.config.MemoryProperties;
 import com.teammind.web.config.QdrantProperties;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
@@ -16,7 +17,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 @MapperScan("com.teammind.**.mapper")
 @EnableConfigurationProperties({QdrantProperties.class, DocumentProperties.class,
         QdrantKnowledgeProperties.class, RetrievalProperties.class, RerankerProperties.class,
-        QwenProperties.class, AgentProperties.class})
+        QwenProperties.class, AgentProperties.class, MemoryProperties.class})
 public class TeamMindApplication {
 
     public static void main(String[] args) {

@@ -34,5 +34,9 @@
             <groupId>com.teammind</groupId>
             <artifactId>team-mind-observability</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.teammind</groupId>
+            <artifactId>team-mind-memory</artifactId>
+        </dependency>
     </dependencies>
 </project>

@@ -13,6 +13,10 @@ import com.teammind.knowledge.api.SearchStrategy;
 import com.teammind.knowledge.application.DocumentService;
 import com.teammind.knowledge.application.KnowledgeSearchService;
 import com.teammind.knowledge.domain.Document;
+import com.teammind.memory.application.MemoryService;
+import com.teammind.memory.domain.Memory;
+import com.teammind.memory.domain.MemoryStatus;
+import com.teammind.memory.domain.MemoryType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -32,6 +36,7 @@ import static org.mockito.Mockito.when;
 class AgentToolsTests {
     private final KnowledgeSearchService searchService = mock(KnowledgeSearchService.class);
     private final DocumentService documentService = mock(DocumentService.class);
+    private final MemoryService memoryService = mock(MemoryService.class);
     private final AgentProperties properties = properties();
 
     @Test
@@ -147,15 +152,29 @@ class AgentToolsTests {
     }
 
     @Test
-    void 历史记忆工具明确返回未启用() {
-        HistoryMemorySearchTool tool = new HistoryMemorySearchTool();
+    void 历史记忆工具返回已确认记忆() {
+        when(memoryService.search(1L, "订单连接数", 5)).thenReturn(List.of(memory(1L)));
+        HistoryMemorySearchTool tool = new HistoryMemorySearchTool(memoryService, properties);
 
         ToolResult result = tool.execute(context(List.of(1L), new EvidenceCollector(5)),
-                Map.of("query", "之前的问题"));
+                Map.of("query", "订单连接数"));
 
-        assertThat(result.success()).isFalse();
-        assertThat(result.content()).contains("Phase 5");
-        assertThat(result.metadata()).containsEntry("available", false);
+        assertThat(result.success()).isTrue();
+        assertThat(result.content()).contains("记忆#1", "订单模块最大连接数为30", "FACT");
+        assertThat(result.metadata()).containsEntry("count", 1);
+    }
+
+    @Test
+    void 历史记忆工具无命中时返回空结果() {
+        when(memoryService.search(1L, "不存在", 5)).thenReturn(List.of());
+        HistoryMemorySearchTool tool = new HistoryMemorySearchTool(memoryService, properties);
+
+        ToolResult result = tool.execute(context(List.of(1L), new EvidenceCollector(5)),
+                Map.of("query", "不存在"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.content()).contains("没有找到");
+        assertThat(result.metadata()).containsEntry("count", 0);
     }
 
     @Test
@@ -182,6 +201,21 @@ class AgentToolsTests {
     private RetrievedChunk chunk(Long chunkId, Long documentId, Long knowledgeBaseId, String name) {
         return new RetrievedChunk(chunkId, documentId, knowledgeBaseId, name, 1, 0, 3,
                 "最大连接数为30", 0.9);
+    }
+
+    private Memory memory(Long id) {
+        Memory memory = new Memory();
+        memory.setId(id);
+        memory.setUserId(1L);
+        memory.setMemoryType(MemoryType.FACT);
+        memory.setTitle("订单连接数");
+        memory.setContent("订单模块最大连接数为30");
+        memory.setSummary("订单连接数为30");
+        memory.setStatus(MemoryStatus.ACTIVE);
+        memory.setVersion(1);
+        memory.setSourceConversationId("conv_1");
+        memory.setUpdatedAt(LocalDateTime.now());
+        return memory;
     }
 
     private Document document(Long id, Long knowledgeBaseId, String name) {

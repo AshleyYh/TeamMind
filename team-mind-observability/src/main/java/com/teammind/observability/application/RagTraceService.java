@@ -17,9 +17,16 @@ public class RagTraceService {
     }
 
     public RagTrace start(String traceId, Long ownerId, String query, List<Long> knowledgeBaseIds, String strategy) {
+        return start(traceId, ownerId, query, knowledgeBaseIds, strategy, null);
+    }
+
+    /** Agent 需要把 Trace 关联到会话；会话必须已存在，否则数据库外键会拒绝写入。 */
+    public RagTrace start(String traceId, Long ownerId, String query, List<Long> knowledgeBaseIds,
+            String strategy, String conversationId) {
         RagTrace trace = new RagTrace();
         trace.setTraceId(traceId);
         trace.setUserId(ownerId);
+        trace.setConversationId(conversationId);
         trace.setStatus("RUNNING");
         trace.setQuery(query);
         trace.setKnowledgeBaseIds(knowledgeBaseIds.stream().map(String::valueOf).collect(Collectors.joining(",")));

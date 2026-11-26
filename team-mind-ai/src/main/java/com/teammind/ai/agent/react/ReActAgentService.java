@@ -8,6 +8,8 @@ import com.teammind.ai.agent.model.AgentModelResponse;
 import com.teammind.ai.agent.model.AgentToolCall;
 import com.teammind.ai.agent.model.AgentToolSpec;
 import com.teammind.ai.agent.model.ConversationMessage;
+import com.teammind.ai.agent.memory.ConversationContext;
+import com.teammind.ai.agent.memory.ConversationSummaryService;
 import com.teammind.ai.agent.model.ModelUsage;
 import com.teammind.ai.agent.prompt.AgentPrompts;
 import com.teammind.ai.agent.task.TaskContext;
@@ -22,6 +24,8 @@ import com.teammind.common.api.ErrorCode;
 import com.teammind.common.exception.BusinessException;
 import com.teammind.knowledge.api.EvidenceRecorder;
 import com.teammind.knowledge.application.KnowledgeBaseService;
+import com.teammind.memory.application.ConversationService;
+import com.teammind.memory.domain.StoredMessage;
 import com.teammind.observability.application.RagTraceService;
 import com.teammind.observability.domain.RagTrace;
 import org.slf4j.Logger;
@@ -60,12 +64,15 @@ public class ReActAgentService {
     private final KnowledgeBaseService knowledgeBaseService;
     private final RagTraceService traceService;
     private final EvidenceRecorder evidenceRecorder;
+    private final ConversationService conversationService;
+    private final ConversationSummaryService conversationSummaryService;
     private final ExecutorService toolExecutor;
 
     public ReActAgentService(TaskUnderstandingService understandingService, ToolRegistry toolRegistry,
             AgentModelGateway modelGateway, AgentProperties properties,
             KnowledgeBaseService knowledgeBaseService, RagTraceService traceService,
-            EvidenceRecorder evidenceRecorder,
+            EvidenceRecorder evidenceRecorder, ConversationService conversationService,
+            ConversationSummaryService conversationSummaryService,
             @Qualifier("agentToolExecutor") ExecutorService toolExecutor) {
         this.understandingService = understandingService;
         this.toolRegistry = toolRegistry;
@@ -74,6 +81,8 @@ public class ReActAgentService {
         this.knowledgeBaseService = knowledgeBaseService;
         this.traceService = traceService;
         this.evidenceRecorder = evidenceRecorder;
+        this.conversationService = conversationService;
+        this.conversationSummaryService = conversationSummaryService;
         this.toolExecutor = toolExecutor;
     }
 
@@ -93,15 +102,17 @@ public class ReActAgentService {
             // 提前校验知识库归属，避免 Agent 在无权限知识库上反复试错。
             knowledgeBaseService.getAccessible(knowledgeBaseIds, request.ownerId());
         }
+        String conversationId = normalizeConversationId(request.conversationId(), request.ownerId(),
+                request.message());
         String traceId = UUID.randomUUID().toString().replace("-", "");
         long startedAt = System.nanoTime();
         long deadline = startedAt + properties.executionTimeout().toNanos();
         RagTrace trace = traceService.start(traceId, request.ownerId(), request.message(),
-                knowledgeBaseIds, "AGENT");
+                knowledgeBaseIds, "AGENT", conversationId);
         observer.onTrace(traceId);
         try {
             AgentAnswer answer = run(request, observer, streamAnswer, trace, traceId,
-                    knowledgeBaseIds, documentIds, deadline);
+                    knowledgeBaseIds, documentIds, deadline, conversationId);
             traceService.finish(trace.getId(), true, elapsedMillis(startedAt), answer.answer());
             return answer;
         } catch (RuntimeException exception) {
@@ -112,14 +123,18 @@ public class ReActAgentService {
 
     private AgentAnswer run(AgentExecutionRequest request, AgentObserver observer, boolean streamAnswer,
             RagTrace trace, String traceId, List<Long> knowledgeBaseIds, List<Long> documentIds,
-            long deadline) {
+            long deadline, String conversationId) {
+        List<String> warnings = new ArrayList<>();
+        ConversationContext conversation = conversationSummaryService.load(conversationId,
+                request.ownerId(), request.history());
+        warnings.addAll(conversation.warnings());
         TaskContext taskContext = new TaskContext(request.message(), request.ownerId(), knowledgeBaseIds,
-                documentIds, request.history());
+                documentIds, conversation.messages(), conversation.summary());
         TaskUnderstanding task = understandingService.understand(taskContext);
         traceService.updateStrategy(trace.getId(), "AGENT:" + task.taskType());
         observer.onTask(task);
 
-        List<String> warnings = new ArrayList<>(task.warnings());
+        warnings.addAll(task.warnings());
         List<AgentStep> steps = new ArrayList<>();
         EvidenceCollector evidence = new EvidenceCollector(properties.maxEvidence());
         ToolExecutionContext toolContext = new ToolExecutionContext(traceId, request.ownerId(),
@@ -261,9 +276,10 @@ public class ReActAgentService {
             termination = TerminationReason.MODEL_ERROR;
         }
         evidenceRecorder.markCitations(traceId, evidence.chunkIds(finalAnswer.citedIndexes()));
+        saveConversation(conversationId, request, traceId, finalAnswer.answer(), warnings);
         warnings = new ArrayList<>(new LinkedHashSet<>(warnings));
         return new AgentAnswer(finalAnswer.answer(), evidence.citations(), traceId, task.taskType(), task,
-                steps, termination, warnings, usage, request.conversationId());
+                steps, termination, warnings, usage, conversationId);
     }
 
     private FinalAnswer generateFinalAnswer(List<AgentMessage> messages, int evidenceCount,
@@ -399,6 +415,41 @@ public class ReActAgentService {
                 abbreviate(content, STEP_CONTENT_CHARS), java.util.Map.of(), success, durationMillis);
         steps.add(step);
         observer.onStep(step);
+    }
+
+    private String normalizeConversationId(String conversationId, Long ownerId, String message) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return null;
+        }
+        String normalized = conversationId.trim();
+        // 先创建/校验会话元数据，保证 ai_trace 的外键和后续 Redis 写入都指向同一会话。
+        conversationService.ensure(normalized, ownerId, titleFromMessage(message));
+        return normalized;
+    }
+
+    private void saveConversation(String conversationId, AgentExecutionRequest request, String traceId,
+            String answer, List<String> warnings) {
+        if (conversationId == null || answer == null || answer.isBlank()) {
+            return;
+        }
+        String now = java.time.LocalDateTime.now().toString();
+        try {
+            conversationService.appendMessages(conversationId, request.ownerId(), List.of(
+                    new StoredMessage("user", request.message(), traceId, now),
+                    new StoredMessage("assistant", answer, traceId, now)));
+        } catch (RuntimeException exception) {
+            // 会话保存失败不能回滚已生成的回答，只记录警告供客户端展示。
+            log.warn("会话消息保存失败：conversationId={}", conversationId, exception);
+            warnings.add("会话记忆保存失败，本次回答未写入短期上下文。");
+        }
+    }
+
+    private String titleFromMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "新会话";
+        }
+        String normalized = message.trim().replaceAll("\\s+", " ");
+        return normalized.length() <= 60 ? normalized : normalized.substring(0, 60);
     }
 
     private String fallbackAnswer(TerminationReason reason) {

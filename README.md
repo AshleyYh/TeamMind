@@ -1,10 +1,10 @@
 # TeamMind
 
-企业级研发知识库 Agent 平台。当前完成 **Phase 4：ReAct Agent**，已经具备从文档入库到 Agent 工具调用、带真实引用问答和 SSE 流式输出的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环和 SSE 流式回答。
+企业级研发知识库 Agent 平台。当前完成 **Phase 5：记忆系统**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、Redis 短期会话记忆和确认制长期记忆的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要和长期记忆确认/检索。
 
-长期记忆、完整链路追踪、量化评测、登录认证和前端业务页面尚未实现。
+完整链路追踪、量化评测、登录认证和前端业务页面尚未实现。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 4 验收记录](docs/phase4-verification.md)，Phase 3 历史验收见 [Phase 3 验收记录](docs/phase3-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 5 验收记录](docs/phase5-verification.md)，Phase 4 历史验收见 [Phase 4 验收记录](docs/phase4-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 当前进度
 
@@ -14,7 +14,8 @@
 | Phase 2 | ✅ 完成 | 知识库 CRUD、文档上传与异步处理、PDF/DOCX/TXT/Markdown 解析、文本分块与重叠、Embedding 入库、基础 RAG 问答与引用 |
 | Phase 3 | ✅ 完成 | BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、BGE/Qwen Reranker、文档版本过滤、四种检索策略、Evidence Board |
 | Phase 4 | ✅ 完成 | 规则预处理、结构化任务理解、任务分类、Tool Registry、Function Calling、ReAct 执行循环、工具异常与超时、执行限制、SSE 流式回答 |
-| Phase 5+ | ⏳ 未开始 | 短期/长期记忆、完整 Trace/Span、量化评测、登录认证、前端业务页面 |
+| Phase 5 | ✅ 完成 | Redis 短期会话记忆、上下文裁剪、增量摘要、长期记忆提取/确认/更新/失效/检索、记忆来源追溯、Agent 连续对话 |
+| Phase 6+ | ⏳ 未开始 | 完整 Trace/Span、量化评测、登录认证、前端业务页面 |
 
 ## 已实现功能
 
@@ -41,9 +42,13 @@
 
 执行边界由 `AGENT_MAX_ITERATIONS`、`AGENT_MAX_TOOL_CALLS`、`AGENT_MAX_CONSECUTIVE_FAILURES`、`AGENT_EXECUTION_TIMEOUT` 和 `AGENT_TOOL_TIMEOUT` 控制。达到任一限制后仍会生成最终答案，并在 `termination` 和 `warnings` 中说明原因。非流式接口返回完整 `taskUnderstanding`、`steps`、`citations` 和 `usage`；`POST /api/v1/chat/stream` 通过 SSE 推送 `start`、`task`、`step`、`answer_delta`、`done` 和 `error` 事件。
 
-模型返回的越界引用编号会被移除：非流式与流式 Agent 回答使用同一套引用过滤器，避免把不存在的证据编号展示给用户。`historyMemorySearch` 和 `getConversationHistory` 是 Phase 5 前的降级实现，只使用本次请求携带的历史，不伪造长期记忆。
+模型返回的越界引用编号会被移除：非流式与流式 Agent 回答使用同一套引用过滤器，避免把不存在的证据编号展示给用户。
 
-**基础设施与可观测性**：PostgreSQL 保存业务元数据、分块和检索词元；Qdrant 保存向量；Redis 已完成连接与健康检查，为后续会话和缓存预留；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
+**短期会话记忆**：Agent 请求可以携带 `conversationId`。会话元数据保存在 PostgreSQL `ai_conversation`，最近消息和增量摘要保存在 Redis，默认 7 天未活动自动过期。每次对话只把最近 20 条消息放入提示词；超过 40 条时，服务端先把超出窗口的旧消息与已有摘要合并，再裁剪 Redis，保证上下文长度有界。Redis 不可用时，Agent 会降级为请求携带的 `history` 并在 `warnings` 中说明，不会阻断回答。会话删除会逻辑删除数据库记录并清理 Redis。
+
+**长期记忆**：从会话中提取的稳定事实、偏好、决策和经验先保存为 `DRAFT` 候选，必须调用确认接口变为 `ACTIVE` 后才会被 Agent 的 `historyMemorySearch` 工具检索。每条记忆保存类型、标题、内容、摘要、置信度、版本、来源会话和来源 `traceId`；支持修改（版本递增）、失效、逻辑删除、按状态/类型查询和关键词检索。检索使用 ACTIVE 过滤和中文二元词召回，并更新 `lastUsedAt`。密码、密钥、令牌等敏感信息不会被提取。
+
+**基础设施与可观测性**：PostgreSQL 保存业务元数据、分块、检索词元、会话元数据和长期记忆；Qdrant 保存向量；Redis 保存短期会话消息、增量摘要，并提供健康检查；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
 
 ## 技术基线
 
@@ -56,6 +61,7 @@ team-mind-web            Controller、启动类、应用配置、Swagger 配置
 team-mind-ai             Qwen 对话/Embedding 网关、RAG 问答编排、Agent 任务理解/工具/ReAct、提示词
 team-mind-knowledge      知识库、文档、分块、解析器、向量库、BM25、RRF、重排
 team-mind-observability  轻量 RAG Trace、Evidence Board、Qdrant 健康检查
+team-mind-memory         Redis 短期会话、增量摘要存储、长期记忆与检索
 team-mind-common         统一响应、错误码、业务异常
 team-mind-system         用户与系统模块（Phase 1 骨架）
 team-mind-evaluation     评测模块（Phase 1 骨架）
@@ -210,6 +216,23 @@ MyBatis-Plus 生成的是 19 位雪花编号，超过了 JavaScript 的 `Number.
 | POST | `/api/v1/chat/stream` | Agent SSE 流式对话，推送任务、步骤、答案增量和完成事件 | Body 同上；响应 `text/event-stream` |
 | GET | `/api/v1/evidence/{traceId}` | 查询一次请求的 Evidence 证据快照 | Path：`traceId`；Query：`ownerId` |
 
+### 会话与长期记忆
+
+| 方法 | 路径 | 作用 | 主要参数 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/conversations` | 查询当前用户的会话列表 | Query：`ownerId` |
+| GET | `/api/v1/conversations/{conversationId}/messages` | 查询增量摘要和最近消息 | Path：`conversationId`；Query：`ownerId`、`limit` |
+| DELETE | `/api/v1/conversations/{conversationId}` | 逻辑删除会话并清理 Redis | Path：`conversationId`；Query：`ownerId` |
+| POST | `/api/v1/conversations/{conversationId}/memories/extract` | 从会话提取长期记忆 DRAFT 候选 | Path：`conversationId`；Query：`ownerId` |
+| GET | `/api/v1/memories` | 查询长期记忆，可按状态和类型过滤 | Query：`ownerId`、`status`、`type`、`limit` |
+| GET | `/api/v1/memories/search` | 检索 ACTIVE 长期记忆 | Query：`ownerId`、`query`、`limit` |
+| GET | `/api/v1/memories/{id}` | 查询记忆详情和来源 | Path：`id`；Query：`ownerId` |
+| POST | `/api/v1/memories` | 新增记忆草稿 | Body：`ownerId`、`memoryType`、`title`、`content`、`summary`、`sourceConversationId`、`sourceTraceId`、`confidence` |
+| PUT | `/api/v1/memories/{id}` | 修改记忆并递增版本 | Path：`id`；Body：`ownerId`、`memoryType`、`title`、`content`、`summary` |
+| POST | `/api/v1/memories/{id}/confirm` | 确认 DRAFT，变为 ACTIVE | Path：`id`；Query：`ownerId` |
+| POST | `/api/v1/memories/{id}/invalidate` | 使记忆失效 | Path：`id`；Query：`ownerId` |
+| DELETE | `/api/v1/memories/{id}` | 逻辑删除记忆并标记失效 | Path：`id`；Query：`ownerId` |
+
 ### 健康检查
 
 | 方法 | 路径 | 作用 |
@@ -305,9 +328,36 @@ curl -N -X POST http://localhost:8080/api/v1/chat/stream \
   -d '{"message":"订单模块的最大连接数是多少？","knowledgeBaseIds":[知识库ID],"ownerId":1}'
 ```
 
-事件依次为 `start`、`task`、若干 `step`、`answer_delta` 和 `done`；失败时返回 `error` 事件。`historyMemorySearch` 当前只会返回 Phase 5 未启用的提示，Agent 会继续使用知识库检索或说明限制。
+事件依次为 `start`、`task`、若干 `step`、`answer_delta` 和 `done`；失败时返回 `error` 事件。
 
-**升级注意：** Phase 2 已入库文档需要逐篇调用重处理接口，补齐 BM25 检索词元后才能参与关键词召回。
+连续对话只需复用同一个 `conversationId`。服务端会从 Redis 加载最近消息和增量摘要，回答后自动写入用户消息和助手回答：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/agent/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"那它的超时时间呢？","knowledgeBaseIds":[知识库ID],"ownerId":1,
+       "conversationId":"conv_001"}'
+```
+
+查看会话摘要和最近消息：
+
+```bash
+curl 'http://localhost:8080/api/v1/conversations/conv_001/messages?ownerId=1&limit=50'
+```
+
+结束会话后，可以提取长期记忆候选：
+
+```bash
+curl -X POST 'http://localhost:8080/api/v1/conversations/conv_001/memories/extract?ownerId=1'
+```
+
+返回的候选状态为 `DRAFT`，确认后才会被新会话的 `historyMemorySearch` 工具检索：
+
+```bash
+curl -X POST 'http://localhost:8080/api/v1/memories/记忆ID/confirm?ownerId=1'
+```
+
+**升级注意：** Phase 2 已入库文档需要逐篇调用重处理接口，补齐 BM25 检索词元后才能参与关键词召回。Phase 5 新增 `V4__add_phase5_memory.sql`，升级后需执行 Flyway 迁移；已有会话和记忆数据为空时无需回填。
 
 ## 配置说明
 
@@ -378,6 +428,18 @@ Spring Boot 的覆盖顺序为：命令行参数 > 环境变量 > 激活 profile
 | `AGENT_EXECUTION_TIMEOUT` | `90s` | Agent 整体执行超时 |
 | `AGENT_TOOL_TIMEOUT` | `20s` | 单工具执行超时，必须不大于整体超时 |
 
+**会话与长期记忆**：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MEMORY_CONVERSATION_TTL` | `7d` | Redis 会话消息和摘要的过期时间 |
+| `MEMORY_MAX_MESSAGES` | `200` | Redis 单会话最大消息数 |
+| `MEMORY_CONTEXT_MESSAGES` | `20` | 进入提示词的最近消息数 |
+| `MEMORY_SUMMARY_THRESHOLD` | `40` | 超过该消息数后触发增量摘要和裁剪 |
+| `MEMORY_MAX_SUMMARY_CHARS` | `2000` | 会话摘要最大字符数 |
+| `MEMORY_MAX_SEARCH_RESULTS` | `5` | Agent 每次长期记忆检索最大条数 |
+| `MEMORY_MAX_EXTRACTION_CANDIDATES` | `5` | 单次会话最多提取的长期记忆候选数 |
+
 **Ollama 模式**：
 
 | 变量 | 默认值 | 说明 |
@@ -403,8 +465,9 @@ Flyway 在应用启动时自动执行 `team-mind-web/src/main/resources/db/migra
 - `V1__create_phase1_schema.sql`：用户、知识库、文档、分块、Trace、Evidence 基础表
 - `V2__add_phase2_constraints.sql`：Phase 2 约束与索引
 - `V3__add_phase3_advanced_rag.sql`：BM25 检索词元、生成式 `tsvector`、GIN 索引，以及 Evidence 快照字段
+- `V4__add_phase5_memory.sql`：长期记忆标题、摘要、来源 Trace、置信度、使用时间和逻辑删除，以及检索索引
 
-Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答，没有新增数据库迁移。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V4__*.sql`。
+Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Phase 5 通过 `ai_trace.conversation_id` 把 Trace 关联到会话。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V5__*.sql`。
 
 ## 构建与测试
 
@@ -413,7 +476,7 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答，�
 ./mvnw test                 # 只运行单元测试
 ```
 
-默认单元与上下文测试共 **94 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议、原有 RAG 和 Web 接口。真实 Qwen、Reranker 和 PostgreSQL/Qdrant 集成验收仍需单独执行。
+默认单元与上下文测试共 **132 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、会话与记忆 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
 
 真实基础设施集成测试会使用独立端口和临时存储，结束后自动删除：
 
@@ -429,10 +492,14 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答，�
 - 没有文件病毒扫描、接口限流、对象存储和模型计费监控；上传文件保存在本地磁盘。
 - 只支持 PDF、DOCX、TXT 和 Markdown；图片 OCR、Excel、PPT 等格式尚未支持。
 - Ollama profile 只覆盖对话与 Embedding，默认的 `HYBRID_RERANK` 仍需要 DashScope Reranker 或兼容接口；不配置时可改用 `HYBRID`。Agent 的 Function Calling 和流式输出需要所选对话模型支持 OpenAI 兼容的 `tools` 与 `stream` 协议。
-- `historyMemorySearch` 是 Phase 5 占位实现，`getConversationHistory` 只读取请求携带的 `history`；服务端尚未持久化会话。
+- 短期记忆依赖 Redis；Redis 不可用时 Agent 会降级为请求携带的 `history`，会话查询接口会返回 `50301`。
+- 长期记忆提取和增量摘要依赖对话模型，模型不可用时不会生成摘要或候选；摘要失败会保留原消息，下次请求重试。
+- 长期记忆检索使用关键词和中文二元词，没有引入向量检索；大量记忆场景下后续可增加 Embedding 或全文索引。
+- 记忆提取必须通过 `POST /conversations/{id}/memories/extract` 显式触发，候选需要人工确认；尚未实现自动提取和前端审批页面。
+- 会话删除只清理 Redis 和会话元数据，长期记忆中的来源会话/Trace 字段会保留用于追溯。
 - Agent 执行步骤目前通过响应和 SSE 返回，尚未写入独立 Span/工具调用表；完整 Trace、Token 统计和前端执行监控属于 Phase 6 和 Phase 8。
 - `documentSearch` 受底层检索能力限制，采用扩大候选集后按文档 ID 过滤的近似实现，大文档集下可能遗漏候选集之外的证据。
-- 没有短期/长期记忆、完整 Span/Token 追踪、量化评测和前端业务页面，这些属于后续阶段。
+- 没有完整 Span/Token 追踪、量化评测和前端业务页面，这些属于后续阶段。
 
 ## 常见问题
 

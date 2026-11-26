@@ -13,6 +13,7 @@ public class RagTrace {
     private Long id;
     private String traceId;
     private Long userId;
+    private String conversationId;
     private String status;
     private Long totalDuration;
     private String knowledgeBaseIds;
@@ -27,6 +28,8 @@ public class RagTrace {
     public void setTraceId(String traceId) { this.traceId = traceId; }
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
+    public String getConversationId() { return conversationId; }
+    public void setConversationId(String conversationId) { this.conversationId = conversationId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Long getTotalDuration() { return totalDuration; }

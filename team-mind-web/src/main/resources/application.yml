@@ -84,7 +84,7 @@ management:
 info:
   application:
     name: TeamMind
-    phase: Phase 4 - ReAct Agent
+    phase: Phase 5 - Memory System
 
 teammind:
   qdrant:
@@ -145,6 +145,16 @@ teammind:
     max-chunk-chars: ${AGENT_MAX_CHUNK_CHARS:1200}
     execution-timeout: ${AGENT_EXECUTION_TIMEOUT:90s}
     tool-timeout: ${AGENT_TOOL_TIMEOUT:20s}
+  memory:
+    # 短期会话消息只保存在 Redis，默认 7 天未活动自动过期。
+    conversation-ttl: ${MEMORY_CONVERSATION_TTL:7d}
+    max-messages: ${MEMORY_MAX_MESSAGES:200}
+    # 进入提示词的最近消息数；超出的旧消息先摘要再裁剪。
+    context-messages: ${MEMORY_CONTEXT_MESSAGES:20}
+    summary-threshold: ${MEMORY_SUMMARY_THRESHOLD:40}
+    max-summary-chars: ${MEMORY_MAX_SUMMARY_CHARS:2000}
+    max-search-results: ${MEMORY_MAX_SEARCH_RESULTS:5}
+    max-extraction-candidates: ${MEMORY_MAX_EXTRACTION_CANDIDATES:5}
 
 logging:
   level:

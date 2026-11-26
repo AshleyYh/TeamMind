@@ -1,10 +1,10 @@
-# TeamMind 当前架构说明（Phase 4）
+# TeamMind 当前架构说明（Phase 5）
 
 ## 目标与边界
 
-Phase 4 在 Phase 3 高级 RAG 之上实现 Agent 系统：规则预处理、LLM 结构化任务理解、任务分类、Tool Registry、Function Calling、ReAct 执行循环、工具异常与超时处理、执行次数限制和 SSE 流式回答。
+Phase 5 在 Phase 4 Agent 之上实现三层记忆：Redis 短期会话记忆、增量摘要和 PostgreSQL 长期记忆。Agent 通过 `conversationId` 加载最近消息与摘要，回答后写回短期记忆；长期记忆由会话显式提取为 DRAFT，经用户确认变为 ACTIVE 后由 `historyMemorySearch` 工具检索。
 
-本阶段仍不包含长期记忆、完整 Span/Token 追踪、量化评测、登录认证和前端业务页面。`historyMemorySearch` 是明确返回“Phase 5 未启用”的占位工具，`getConversationHistory` 只读取本次请求携带的历史消息。`ownerId` 仍只是开发期归属参数，不是身份认证。
+本阶段仍不包含完整 Span/Token 追踪、量化评测、登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数，不是身份认证。短期记忆依赖 Redis，长期记忆检索暂用关键词和中文二元词，不引入向量检索。
 
 ## 模块与依赖
 
@@ -14,21 +14,65 @@ team-mind-web
        -> team-mind-system
        -> team-mind-knowledge -> team-mind-common
        -> team-mind-observability -> team-mind-knowledge
+       -> team-mind-memory -> team-mind-common
   -> team-mind-evaluation -> team-mind-ai
 ```
 
-`team-mind-ai` 新增 `agent` 包：
+`team-mind-memory` 负责会话元数据、Redis 消息读写、摘要存储、长期记忆实体与检索：
+
+```text
+memory/config       MemoryProperties：TTL、消息窗口、摘要阈值、记忆检索上限
+memory/domain       Conversation、Memory、StoredMessage、ConversationSummary、枚举
+memory/application  ConversationService、MemoryService
+memory/mapper       ConversationMapper、MemoryMapper
+```
+
+`team-mind-ai` 的 `agent` 包负责任务理解、工具和 ReAct，并通过 `ConversationSummaryService`、`MemoryExtractionService` 使用记忆模块：
 
 ```text
 agent/task      规则预处理、任务类型、结构化任务理解与校验
 agent/tool      工具端口、注册表、参数校验、证据编号器、五个工具实现
 agent/react     ReAct 循环、执行步骤、终止原因、Agent 响应
+agent/memory    会话上下文加载、增量摘要、长期记忆提取
 agent/model     Agent 模型端口与 Qwen OpenAI 兼容实现
-agent/prompt    任务理解、ReAct、最终回答提示词
+agent/prompt    任务理解、ReAct、最终回答、摘要和记忆提取提示词
 agent/config    Agent 执行边界配置与专用线程池
 ```
 
-`agent` 只依赖 `KnowledgeSearchService`、`DocumentService`、`KnowledgeBaseService`、`EvidenceRecorder` 等应用端口，不直接访问 Mapper、Qdrant 或数据库。模型调用通过 `AgentModelGateway` 抽象，测试可替换为确定性实现。
+`agent` 只依赖应用服务端口，不直接访问 Mapper、Qdrant 或数据库。模型调用通过 `AgentModelGateway`/`ChatCompletionGateway` 抽象，测试可替换为确定性实现。
+
+## 记忆系统
+
+### 短期记忆
+
+- 会话元数据保存在 PostgreSQL `ai_conversation`，消息正文保存在 Redis List。
+- Redis key 为 `teammind:memory:conversation:{conversationId}:messages`，默认 7 天过期。
+- 每次对话只把最近 `MEMORY_CONTEXT_MESSAGES` 条消息放入提示词。
+- 消息数超过 `MEMORY_SUMMARY_THRESHOLD` 时，把超出窗口的旧消息与已有摘要合并，写入摘要 key，再裁剪 Redis，只保留最近窗口。
+- 摘要失败时保留原始消息并记录警告，下次请求重试，不丢历史。
+- Redis 不可用时，Agent 降级为请求携带的 `history`，会话查询接口返回 `50301`。
+
+### 长期记忆
+
+- 长期记忆保存在 PostgreSQL `ai_memory`，字段包括类型、标题、内容、摘要、来源会话、来源 Trace、版本、置信度、状态和使用时间。
+- 新记忆先保存为 `DRAFT`；只有 `POST /api/v1/memories/{id}/confirm` 后才变为 `ACTIVE` 并参与检索。
+- 修改内容递增 `version`，失效和逻辑删除保留来源数据用于追溯。
+- 检索只返回当前用户的 `ACTIVE` 且未删除记忆，使用关键词和中文二元词 OR 匹配，返回后更新 `lastUsedAt`。
+- 从会话提取长期记忆使用 LLM 输出 JSON 候选，服务端校验类型、内容和置信度，跳过敏感/非法候选；提取结果仍是 DRAFT，需要人工确认。
+
+### 会话与 Agent 集成
+
+```text
+Agent 请求（conversationId）
+  -> 校验/创建会话元数据（ai_conversation）
+  -> 从 Redis 加载最近消息 + 增量摘要
+  -> 摘要 + 最近消息进入任务理解和 Agent 上下文
+  -> ReAct 执行，historyMemorySearch 可检索 ACTIVE 长期记忆
+  -> 保存 user/assistant 消息回 Redis
+  -> ai_trace 关联 conversation_id
+```
+
+`historyMemorySearch` 的 `记忆#n` 不是文档引用编号；只有 `knowledgeSearch` 等工具返回的 `证据 [n]` 才能作为最终答案的文档引用。
 
 ## Agent 处理链路
 
@@ -105,7 +149,7 @@ agent/config    Agent 执行边界配置与专用线程池
 - 跨增量拆分的 `[1]` 会被正确拼接。
 - 流式模式下无法撤回已发送文本，因此采用“移除非法标记”而不是整段拒绝；普通 RAG 接口仍保持严格拒绝语义。
 
-检索工具通过 `EvidenceRecorder` 写入真实 Chunk 快照，回答完成后按实际引用编号更新 `cited=true`。Agent 复用 `ai_trace` 记录状态、问题、知识库范围、任务类型、回答和耗时；完整 Span/工具调用表留到 Phase 6。
+检索工具通过 `EvidenceRecorder` 写入真实 Chunk 快照，回答完成后按实际引用编号更新 `cited=true`。Agent 复用 `ai_trace` 记录状态、问题、知识库范围、任务类型、回答、耗时和 `conversation_id`；完整 Span/工具调用表留到 Phase 6。
 
 ## SSE 事件
 
@@ -126,10 +170,14 @@ ReAct 决策与工具调用使用非流式模型调用，保证工具协议完�
 
 `AGENT_MAX_ITERATIONS`、`AGENT_MAX_TOOL_CALLS`、`AGENT_MAX_CONSECUTIVE_FAILURES`、`AGENT_MAX_EVIDENCE`、`AGENT_MAX_HISTORY_MESSAGES`、`AGENT_MAX_QUESTION_LENGTH`、`AGENT_MAX_OBSERVATION_CHARS`、`AGENT_MAX_CHUNK_CHARS`、`AGENT_EXECUTION_TIMEOUT` 和 `AGENT_TOOL_TIMEOUT` 控制执行边界。Agent 使用独立的 `agentToolExecutor` 有界线程池和 `agentStreamExecutor` 虚拟线程池，避免慢工具拖垮普通 RAG 检索线程池。
 
+`MEMORY_CONVERSATION_TTL`、`MEMORY_MAX_MESSAGES`、`MEMORY_CONTEXT_MESSAGES`、`MEMORY_SUMMARY_THRESHOLD`、`MEMORY_MAX_SUMMARY_CHARS`、`MEMORY_MAX_SEARCH_RESULTS` 和 `MEMORY_MAX_EXTRACTION_CANDIDATES` 控制短期记忆窗口、摘要和长期记忆提取/检索上限。
+
 ## 已知限制
 
-- 真实 Qwen Function Calling 和流式接口尚未用付费配额验收，自动化测试使用本地 HTTP 替身。
-- 任务分类效果尚未用固定数据集量化，属于 Phase 7。
+- 真实 Qwen Function Calling、流式接口、摘要和记忆提取尚未用付费配额验收，自动化测试使用本地 HTTP 替身。
+- 任务分类、记忆提取和摘要效果尚未用固定数据集量化，属于 Phase 7。
 - `documentSearch` 因底层检索暂不支持按文档下推过滤，采用扩大候选集后精确过滤，可能遗漏候选集之外的文档分块。
-- 长期记忆、会话持久化、完整执行 Span、Agent 监控页面和身份认证仍属于后续阶段。
+- 长期记忆检索使用关键词和中文二元词，没有向量召回；大记忆量场景需要后续增加 Embedding 或全文索引。
+- 长期记忆提取需要显式调用接口并人工确认，尚未实现自动提取和前端审批页面。
+- 完整执行 Span、Agent 监控页面和身份认证仍属于后续阶段。
 - SSE 连接可能受反向代理空闲超时影响，生产部署需要配置代理缓冲和超时。

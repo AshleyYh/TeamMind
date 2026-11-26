@@ -23,6 +23,7 @@
         <module>team-mind-system</module>
         <module>team-mind-knowledge</module>
         <module>team-mind-observability</module>
+        <module>team-mind-memory</module>
         <module>team-mind-ai</module>
         <module>team-mind-evaluation</module>
         <module>team-mind-web</module>
@@ -64,6 +65,11 @@
             <dependency>
                 <groupId>com.teammind</groupId>
                 <artifactId>team-mind-observability</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.teammind</groupId>
+                <artifactId>team-mind-memory</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

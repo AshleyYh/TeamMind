@@ -10,11 +10,18 @@ public record TaskContext(
         Long ownerId,
         List<Long> allowedKnowledgeBaseIds,
         List<Long> allowedDocumentIds,
-        List<ConversationMessage> history) {
+        List<ConversationMessage> history,
+        String conversationSummary) {
 
     public TaskContext {
         allowedKnowledgeBaseIds = allowedKnowledgeBaseIds == null ? List.of() : List.copyOf(allowedKnowledgeBaseIds);
         allowedDocumentIds = allowedDocumentIds == null ? List.of() : List.copyOf(allowedDocumentIds);
         history = history == null ? List.of() : List.copyOf(history);
+    }
+
+    /** 兼容 Phase 4 的无摘要构造方式。 */
+    public TaskContext(String question, Long ownerId, List<Long> allowedKnowledgeBaseIds,
+            List<Long> allowedDocumentIds, List<ConversationMessage> history) {
+        this(question, ownerId, allowedKnowledgeBaseIds, allowedDocumentIds, history, null);
     }
 }

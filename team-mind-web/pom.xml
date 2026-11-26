@@ -15,6 +15,10 @@
         </dependency>
         <dependency>
             <groupId>com.teammind</groupId>
+            <artifactId>team-mind-memory</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.teammind</groupId>
             <artifactId>team-mind-evaluation</artifactId>
         </dependency>
         <dependency>

@@ -1,11 +1,15 @@
 package com.teammind.ai.agent.react;
 
 import com.teammind.ai.agent.config.AgentProperties;
+import com.teammind.ai.agent.memory.ConversationContext;
+import com.teammind.ai.agent.memory.ConversationSummaryService;
 import com.teammind.ai.agent.model.AgentModelGateway;
 import com.teammind.ai.agent.model.AgentModelResponse;
 import com.teammind.ai.agent.model.AgentToolCall;
 import com.teammind.ai.agent.model.AgentToolSpec;
+import com.teammind.ai.agent.model.ConversationMessage;
 import com.teammind.ai.agent.model.ModelUsage;
+import com.teammind.ai.agent.task.TaskContext;
 import com.teammind.ai.agent.task.TaskType;
 import com.teammind.ai.agent.task.TaskUnderstanding;
 import com.teammind.ai.agent.task.TaskUnderstandingService;
@@ -17,10 +21,13 @@ import com.teammind.common.exception.BusinessException;
 import com.teammind.knowledge.api.EvidenceRecorder;
 import com.teammind.knowledge.api.RetrievedChunk;
 import com.teammind.knowledge.application.KnowledgeBaseService;
+import com.teammind.memory.application.ConversationService;
+import com.teammind.memory.domain.StoredMessage;
 import com.teammind.observability.application.RagTraceService;
 import com.teammind.observability.domain.RagTrace;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,8 +40,10 @@ import java.util.function.Consumer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -49,12 +58,16 @@ class ReActAgentServiceTests {
     private final KnowledgeBaseService knowledgeBaseService = mock(KnowledgeBaseService.class);
     private final RagTraceService traceService = mock(RagTraceService.class);
     private final EvidenceRecorder evidenceRecorder = mock(EvidenceRecorder.class);
+    private final ConversationService conversationService = mock(ConversationService.class);
+    private final ConversationSummaryService conversationSummaryService = mock(ConversationSummaryService.class);
     private final ExecutorService toolExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     {
         RagTrace trace = new RagTrace();
         trace.setId(99L);
-        when(traceService.start(anyString(), any(), anyString(), any(), anyString())).thenReturn(trace);
+        when(traceService.start(anyString(), any(), anyString(), any(), anyString(), any())).thenReturn(trace);
+        when(conversationSummaryService.load(any(), any(), any())).thenAnswer(invocation ->
+                ConversationContext.fallback(invocation.getArgument(0), invocation.getArgument(2)));
         when(toolRegistry.specifications()).thenReturn(List.of(
                 new AgentToolSpec("knowledgeSearch", "检索知识库",
                         java.util.Map.of("type", "object", "properties", java.util.Map.of())),
@@ -80,6 +93,39 @@ class ReActAgentServiceTests {
         assertThat(answer.citations()).isEmpty();
         verify(toolRegistry, never()).execute(anyString(), anyString(), any());
         verify(traceService).finish(eq(99L), eq(true), anyLong(), eq("你好，我是 TeamMind。"));
+    }
+
+    @Test
+    void 会话消息在回答后写入短期记忆() {
+        when(understandingService.understand(any())).thenReturn(task(TaskType.GENERAL_CHAT));
+        when(modelGateway.complete(any())).thenReturn(response("你好，我是 TeamMind。"));
+
+        service(properties()).chat(request("你好", List.of(1L)));
+
+        verify(conversationService).ensure(eq("conv_1"), eq(1L), eq("你好"));
+        verify(conversationService).appendMessages(eq("conv_1"), eq(1L), argThat(messages ->
+                messages.size() == 2
+                        && "user".equals(messages.get(0).role())
+                        && "assistant".equals(messages.get(1).role())
+                        && messages.get(0).content().equals("你好")
+                        && messages.get(1).content().contains("TeamMind")));
+    }
+
+    @Test
+    void 会话摘要和历史传入任务理解() {
+        when(conversationSummaryService.load(eq("conv_1"), eq(1L), any())).thenReturn(
+                new ConversationContext("conv_1", "历史摘要：连接数为30",
+                        List.of(new ConversationMessage("user", "上一问")), List.of()));
+        when(understandingService.understand(any())).thenReturn(task(TaskType.GENERAL_CHAT));
+        when(modelGateway.complete(any())).thenReturn(response("继续回答"));
+
+        service(properties()).chat(request("继续", List.of(1L)));
+
+        ArgumentCaptor<TaskContext> captor = ArgumentCaptor.forClass(TaskContext.class);
+        verify(understandingService).understand(captor.capture());
+        assertThat(captor.getValue().conversationSummary()).contains("连接数为30");
+        assertThat(captor.getValue().history()).singleElement()
+                .satisfies(message -> assertThat(message.content()).isEqualTo("上一问"));
     }
 
     @Test
@@ -283,7 +329,7 @@ class ReActAgentServiceTests {
         assertThatThrownBy(() -> service(properties()).chat(request("最大连接数？", List.of(9L))))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("不可访问");
         verify(modelGateway, never()).complete(any());
-        verify(traceService, never()).start(anyString(), any(), anyString(), any(), anyString());
+        verify(traceService, never()).start(anyString(), any(), anyString(), any(), anyString(), any());
     }
 
     @Test
@@ -299,7 +345,8 @@ class ReActAgentServiceTests {
 
     private ReActAgentService service(AgentProperties properties) {
         return new ReActAgentService(understandingService, toolRegistry, modelGateway, properties,
-                knowledgeBaseService, traceService, evidenceRecorder, toolExecutor);
+                knowledgeBaseService, traceService, evidenceRecorder, conversationService,
+                conversationSummaryService, toolExecutor);
     }
 
     private AgentExecutionRequest request(String message, List<Long> knowledgeBaseIds) {
