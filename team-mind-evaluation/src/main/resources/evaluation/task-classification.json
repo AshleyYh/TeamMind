@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "task-greeting",
+      "question": "你好",
+      "expectedTaskType": "GENERAL_CHAT",
+      "expectedTools": [],
+      "knowledgeBaseIds": []
+    },
+    {
+      "id": "task-history",
+      "question": "我们之前是怎么解决订单连接池问题的？",
+      "expectedTaskType": "HISTORY_QUERY",
+      "expectedTools": ["historyMemorySearch"],
+      "knowledgeBaseIds": []
+    },
+    {
+      "id": "task-document",
+      "question": "帮我查找哪些文档提到连接池",
+      "expectedTaskType": "DOCUMENT_SEARCH",
+      "expectedTools": ["documentSearch"],
+      "knowledgeBaseIds": []
+    },
+    {
+      "id": "task-knowledge",
+      "question": "订单模块的最大连接数是多少？",
+      "expectedTaskType": "KNOWLEDGE_QA",
+      "expectedTools": ["knowledgeSearch"],
+      "knowledgeBaseIds": []
+    },
+    {
+      "id": "task-general",
+      "question": "你能做什么？",
+      "expectedTaskType": "GENERAL_CHAT",
+      "expectedTools": [],
+      "knowledgeBaseIds": []
+    }
+  ]
+}

@@ -13,5 +13,10 @@
             <groupId>com.teammind</groupId>
             <artifactId>team-mind-ai</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

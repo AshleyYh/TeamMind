@@ -1,10 +1,10 @@
-# TeamMind 当前架构说明（Phase 6）
+# TeamMind 当前架构说明（Phase 7）
 
 ## 目标与边界
 
-Phase 6 在 Phase 5 记忆系统之上实现可观测性：Trace/Span、Agent 节点、工具调用、RAG 检索、记忆上下文、Token、耗时、失败节点和 Trace 查询接口。每个 Agent、RAG 问答和独立检索请求都有唯一 `traceId`，可以通过 API 查看完整执行链路。
+Phase 7 在 Phase 6 可观测性之上实现评测体系：任务识别、RAG 检索和长期记忆三类数据集，Recall@K、MRR、NDCG@K、任务准确率、工具命中率、引用精确率/召回率和答案关键词覆盖率，以及评测运行、逐用例结果和 Markdown 报告持久化。
 
-本阶段仍不包含量化评测、登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数，不是身份认证。Trace 只保存摘要，不保存完整提示词、文档正文或密钥。
+本阶段仍不包含登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数，不是身份认证。内置数据集是小规模示例，真实效果评测需要按企业知识库替换数据。
 
 ## 模块与依赖
 
@@ -16,6 +16,17 @@ team-mind-web
        -> team-mind-observability -> team-mind-knowledge
        -> team-mind-memory -> team-mind-common
   -> team-mind-evaluation -> team-mind-ai
+```
+
+`team-mind-evaluation` 负责数据集、指标、评测编排和报告：
+
+```text
+evaluation/dataset   内置 JSON 数据集、白名单加载、版本和 SHA-256
+evaluation/metric    Recall@K、MRR、NDCG@K
+evaluation/application  任务/RAG/记忆评测服务、运行与用例持久化
+evaluation/report    EvaluationReport 和 Markdown 渲染
+evaluation/domain    EvaluationRun、EvaluationCase
+evaluation/mapper    EvaluationRunMapper、EvaluationCaseMapper
 ```
 
 `team-mind-memory` 负责会话元数据、Redis 消息读写、摘要存储、长期记忆实体与检索：
@@ -220,6 +231,43 @@ ReAct 决策与工具调用使用非流式模型调用，保证工具协议完�
 
 `MEMORY_CONVERSATION_TTL`、`MEMORY_MAX_MESSAGES`、`MEMORY_CONTEXT_MESSAGES`、`MEMORY_SUMMARY_THRESHOLD`、`MEMORY_MAX_SUMMARY_CHARS`、`MEMORY_MAX_SEARCH_RESULTS` 和 `MEMORY_MAX_EXTRACTION_CANDIDATES` 控制短期记忆窗口、摘要和长期记忆提取/检索上限。
 
+## 评测体系
+
+### 数据集
+
+- `task-classification.json`：问题、期望任务类型和期望工具。
+- `rag-retrieval.json`：查询、相关文档名、相关关键词和答案关键词。
+- `memory-retrieval.json`：查询和期望记忆关键词。
+- 数据集名使用白名单，加载时计算 SHA-256；运行记录保存名称、版本和 hash，可重复追溯。
+- 单数据集最多 200 个用例。
+
+### 指标
+
+- `Recall@K`：前 K 个结果命中的相关项数 / 相关项总数。
+- `MRR`：第一个相关结果排名的倒数。
+- `NDCG@K`：二值相关性 DCG / IDCG。
+- 任务准确率：任务类型分类正确率。
+- 工具命中率：期望工具集合是否被实际建议工具覆盖。
+- 引用精确率：实际引用文档中相关文档占比。
+- 引用召回率：相关文档中被实际引用的占比。
+- 答案关键词覆盖率：期望关键词在答案中出现的比例。
+
+RAG 检索按文档名去重计算文档级指标；记忆评测按期望关键词判断记忆是否命中。答案/引用指标仅在 `evaluateAnswers=true` 时调用对话模型生成答案，默认关闭以避免无意义的模型消耗。
+
+### 评测运行
+
+```text
+POST /api/v1/evaluation/tasks
+POST /api/v1/evaluation/rag
+POST /api/v1/evaluation/memories
+GET  /api/v1/evaluation/datasets
+GET  /api/v1/evaluation/runs
+GET  /api/v1/evaluation/runs/{runId}
+GET  /api/v1/evaluation/runs/{runId}/report
+```
+
+每次运行保存 `ai_evaluation_run`（状态、数据集 hash、策略、聚合指标、报告、错误）和 `ai_evaluation_case`（期望、实际、指标、耗时、错误）。运行 ID 为 32 位十六进制，报告以 Markdown 返回。评测运行同步执行，适合受控环境的小规模对比。
+
 ## 已知限制
 
 - 真实 Qwen Function Calling、流式接口、摘要和记忆提取尚未用付费配额验收，自动化测试使用本地 HTTP 替身。
@@ -230,4 +278,8 @@ ReAct 决策与工具调用使用非流式模型调用，保证工具协议完�
 - Trace/Span 已落库并提供查询 API；前端时间线、Agent 监控页面和身份认证属于 Phase 8。
 - Span 只保存摘要，完整提示词和文档正文不会写入 Trace 表；Span 写入失败开放，可能缺少部分节点。
 - 记忆提取和摘要的 Token 用量计入 Agent Trace；单独调用记忆提取接口目前不创建独立 Trace。
+- 内置评测数据集是小规模示例，必须按真实知识库调整相关文档名和关键词，不能直接当作生产效果结论。
+- RAG 评测默认不调用对话模型；答案/引用质量评测需要显式开启并消耗配额。
+- 评测同步执行，大数据集可能长时间占用请求；没有统计显著性、置信区间和前端评测页面。
+- 记忆评测基于当前用户已有 ACTIVE 记忆，会更新命中记忆的 `lastUsedAt`，没有独立评测沙箱。
 - SSE 连接可能受反向代理空闲超时影响，生产部署需要配置代理缓冲和超时。

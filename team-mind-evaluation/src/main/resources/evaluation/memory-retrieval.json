@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "memory-connection",
+      "query": "订单模块连接数",
+      "expectedKeyword": "最大连接数为30"
+    },
+    {
+      "id": "memory-tool",
+      "query": "团队统一使用的连接池",
+      "expectedKeyword": "HikariCP"
+    },
+    {
+      "id": "memory-preference",
+      "query": "回答风格偏好",
+      "expectedKeyword": "简洁"
+    }
+  ]
+}

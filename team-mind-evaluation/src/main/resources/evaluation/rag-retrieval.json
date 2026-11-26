@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "rag-connection-pool",
+      "query": "订单模块最大连接数是多少？",
+      "relevantDocumentNames": ["order-design.pdf"],
+      "relevantKeywords": ["连接数", "HikariCP"],
+      "answerKeywords": ["30"]
+    },
+    {
+      "id": "rag-payment-timeout",
+      "query": "支付模块的超时时间如何配置？",
+      "relevantDocumentNames": ["payment-design.pdf"],
+      "relevantKeywords": ["超时", "timeout"],
+      "answerKeywords": ["超时"]
+    },
+    {
+      "id": "rag-failure-history",
+      "query": "上次连接池耗尽是怎么解决的？",
+      "relevantDocumentNames": ["order-design.pdf", "incident-report.pdf"],
+      "relevantKeywords": ["连接池", "耗尽", "扩容"],
+      "answerKeywords": ["扩容"]
+    }
+  ]
+}

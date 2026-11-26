@@ -1,10 +1,10 @@
 # TeamMind
 
-企业级研发知识库 Agent 平台。当前完成 **Phase 6：可观测性**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、短期/长期记忆和全链路 Trace 的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要、长期记忆和 Trace/Span 追踪。
+企业级研发知识库 Agent 平台。当前完成 **Phase 7：评测体系**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、短期/长期记忆、全链路 Trace 和量化评测的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要、长期记忆、Trace/Span，以及 Recall@K、MRR、NDCG、任务准确率和引用质量评测。
 
-量化评测、登录认证和前端业务页面尚未实现。
+登录认证和前端业务页面尚未实现。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 6 验收记录](docs/phase6-verification.md)，Phase 5 历史验收见 [Phase 5 验收记录](docs/phase5-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 7 验收记录](docs/phase7-verification.md)，Phase 6 历史验收见 [Phase 6 验收记录](docs/phase6-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 当前进度
 
@@ -16,7 +16,8 @@
 | Phase 4 | ✅ 完成 | 规则预处理、结构化任务理解、任务分类、Tool Registry、Function Calling、ReAct 执行循环、工具异常与超时、执行限制、SSE 流式回答 |
 | Phase 5 | ✅ 完成 | Redis 短期会话记忆、上下文裁剪、增量摘要、长期记忆提取/确认/更新/失效/检索、记忆来源追溯、Agent 连续对话 |
 | Phase 6 | ✅ 完成 | Trace/Span、Agent 决策与工具节点、RAG 检索节点、Token/耗时统计、失败节点、Trace 查询接口 |
-| Phase 7+ | ⏳ 未开始 | 量化评测、登录认证、前端业务页面 |
+| Phase 7 | ✅ 完成 | 任务识别/RAG/记忆数据集、Recall@K、MRR、NDCG、任务准确率、工具命中率、引用与答案质量、评测运行持久化和 Markdown 报告 |
+| Phase 8 | ⏳ 未开始 | 前端知识库/文档/对话/证据/Agent 监控/评测页面和整体联调 |
 
 ## 已实现功能
 
@@ -51,7 +52,9 @@
 
 **执行追踪**：每个 Agent、RAG 问答和独立检索请求都有 32 位十六进制 `traceId`。`ai_trace` 保存问题、会话、策略、状态、耗时、输入/输出 Token、回答和错误信息；`ai_trace_span` 保存 `MEMORY_CONTEXT`、`TASK_UNDERSTANDING`、`AGENT_DECISION`、`TOOL_CALL`、`RAG_RETRIEVAL`、`LLM_GENERATION`、`FINAL_ANSWER` 等节点，包含父子关系、状态、耗时、Token、输入/输出摘要和错误类型。失败节点可直接从 Trace 详情定位。Span 写入失败开放，不会因为观测数据库异常阻断回答。
 
-**基础设施与可观测性**：PostgreSQL 保存业务元数据、分块、检索词元、会话元数据、长期记忆、Trace 和 Span；Qdrant 保存向量；Redis 保存短期会话消息、增量摘要，并提供健康检查；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
+**评测体系**：内置任务识别、RAG 检索和长期记忆三套数据集，数据集带版本和 SHA-256，可重复执行。任务评测计算任务分类准确率和工具命中率；RAG 评测对 DENSE、BM25、HYBRID、HYBRID_RERANK 分别计算 Recall@K、MRR、NDCG@K，并可选调用对话模型计算引用精确率、引用召回率和答案关键词覆盖率；记忆评测对 ACTIVE 长期记忆计算检索指标。每次运行、逐用例期望/实际/指标和 Markdown 报告都会保存到数据库，可通过运行 ID 追溯和重复对比。
+
+**基础设施与可观测性**：PostgreSQL 保存业务元数据、分块、检索词元、会话元数据、长期记忆、Trace/Span 和评测运行；Qdrant 保存向量；Redis 保存短期会话消息、增量摘要，并提供健康检查；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
 
 ## 技术基线
 
@@ -67,7 +70,7 @@ team-mind-observability  Trace/Span、Token/耗时统计、Evidence Board、Qdra
 team-mind-memory         Redis 短期会话、增量摘要存储、长期记忆与检索
 team-mind-common         统一响应、错误码、业务异常
 team-mind-system         用户与系统模块（Phase 1 骨架）
-team-mind-evaluation     评测模块（Phase 1 骨架）
+team-mind-evaluation     任务/RAG/记忆数据集、Recall@K/MRR/NDCG、评测运行与 Markdown 报告
 team-mind-ui             Vue 3 + TypeScript 前端工作区（Phase 8 实现，非 Maven 模块）
 ```
 
@@ -228,6 +231,18 @@ MyBatis-Plus 生成的是 19 位雪花编号，超过了 JavaScript 的 `Number.
 | GET | `/api/v1/traces/{traceId}/spans` | 查询平铺执行节点，可按 parentSpanId 构建树 | Path：`traceId`；Query：`ownerId` |
 | GET | `/api/v1/traces/{traceId}/evidences` | 查询该 Trace 的 Evidence | Path：`traceId`；Query：`ownerId` |
 
+### 评测
+
+| 方法 | 路径 | 作用 | 主要参数 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/evaluation/datasets` | 查询内置数据集、版本、用例数和 hash | 无 |
+| POST | `/api/v1/evaluation/tasks` | 任务识别与工具选择评测 | Body：`ownerId`、`dataset`、`knowledgeBaseIds` |
+| POST | `/api/v1/evaluation/rag` | 多策略 RAG 检索评测，可选答案/引用评测 | Body：`ownerId`、`knowledgeBaseIds`、`strategies`、`topK`、`dataset`、`evaluateAnswers` |
+| POST | `/api/v1/evaluation/memories` | 长期记忆检索评测 | Body：`ownerId`、`topK`、`dataset` |
+| GET | `/api/v1/evaluation/runs` | 查询历史评测运行 | Query：`ownerId`、`limit` |
+| GET | `/api/v1/evaluation/runs/{runId}` | 查询运行详情和逐用例结果 | Path：`runId`；Query：`ownerId` |
+| GET | `/api/v1/evaluation/runs/{runId}/report` | 下载 Markdown 评测报告 | Path：`runId`；Query：`ownerId` |
+
 ### 会话与长期记忆
 
 | 方法 | 路径 | 作用 | 主要参数 |
@@ -377,6 +392,27 @@ curl -X POST 'http://localhost:8080/api/v1/conversations/conv_001/memories/extra
 curl -X POST 'http://localhost:8080/api/v1/memories/记忆ID/confirm?ownerId=1'
 ```
 
+查看内置评测数据集并执行 RAG 多策略对比：
+
+```bash
+curl 'http://localhost:8080/api/v1/evaluation/datasets'
+
+curl -X POST http://localhost:8080/api/v1/evaluation/rag \
+  -H 'Content-Type: application/json' \
+  -d '{"ownerId":1,"knowledgeBaseIds":[知识库ID],
+       "strategies":["DENSE","BM25","HYBRID","HYBRID_RERANK"],
+       "topK":5,"dataset":"rag-retrieval","evaluateAnswers":false}'
+```
+
+示例数据集使用 `order-design.pdf` 和 `payment-design.pdf` 作为相关文档名；实际使用时请根据本地知识库修改 `team-mind-evaluation/src/main/resources/evaluation/*.json`，或保持文档名一致。`evaluateAnswers=true` 会额外调用 Qwen 生成答案并计算引用和答案关键词指标，会消耗模型配额。
+
+查看历史评测和下载 Markdown 报告：
+
+```bash
+curl 'http://localhost:8080/api/v1/evaluation/runs?ownerId=1&limit=20'
+curl 'http://localhost:8080/api/v1/evaluation/runs/替换为runId/report?ownerId=1'
+```
+
 **升级注意：** Phase 2 已入库文档需要逐篇调用重处理接口，补齐 BM25 检索词元后才能参与关键词召回。Phase 5 新增 `V4__add_phase5_memory.sql`，升级后需执行 Flyway 迁移；已有会话和记忆数据为空时无需回填。
 
 ## 配置说明
@@ -487,8 +523,9 @@ Flyway 在应用启动时自动执行 `team-mind-web/src/main/resources/db/migra
 - `V3__add_phase3_advanced_rag.sql`：BM25 检索词元、生成式 `tsvector`、GIN 索引，以及 Evidence 快照字段
 - `V4__add_phase5_memory.sql`：长期记忆标题、摘要、来源 Trace、置信度、使用时间和逻辑删除，以及检索索引
 - `V5__add_phase6_trace.sql`：Trace 输入/输出 Token、错误信息和结束时间，Span 输入/输出 Token、错误类型，以及查询索引
+- `V6__add_phase7_evaluation.sql`：评测运行、逐用例结果、聚合指标、Markdown 报告和查询索引
 
-Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Phase 5 通过 `ai_trace.conversation_id` 把 Trace 关联到会话；Phase 6 使用 `ai_trace_span` 保存完整执行节点。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V6__*.sql`。
+Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Phase 5 通过 `ai_trace.conversation_id` 把 Trace 关联到会话；Phase 6 使用 `ai_trace_span` 保存完整执行节点；Phase 7 使用 `ai_evaluation_run` 和 `ai_evaluation_case` 保存评测结果。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V7__*.sql`。
 
 ## 构建与测试
 
@@ -497,7 +534,7 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Ph
 ./mvnw test                 # 只运行单元测试
 ```
 
-默认单元与上下文测试共 **141 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议和 Token 解析、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、Trace/Span 记录与查询、会话与记忆 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
+默认单元与上下文测试共 **159 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议和 Token 解析、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、Trace/Span 记录与查询、Recall@K/MRR/NDCG、数据集加载、三类评测服务、评测报告持久化、会话/记忆/评测 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
 
 真实基础设施集成测试会使用独立端口和临时存储，结束后自动删除：
 
@@ -522,7 +559,10 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Ph
 - Trace 写入失败开放，观测数据库异常不会阻断回答，但可能缺少部分节点；Span 只记录摘要，完整提示词和文档正文不会写入 Trace 表。
 - 记忆提取和摘要的 Token 用量计入 Agent Trace；单独调用记忆提取接口目前不创建独立 Trace。
 - `documentSearch` 受底层检索能力限制，采用扩大候选集后按文档 ID 过滤的近似实现，大文档集下可能遗漏候选集之外的证据。
-- 没有量化评测、登录认证和前端业务页面，这些属于后续阶段。
+- 内置评测数据集只是小规模示例，需要按真实知识库替换相关文档名和关键词；RAG 评测默认不调用对话模型，答案/引用质量评测需要显式开启并消耗配额。
+- 评测运行当前同步执行，大数据集可能长时间占用请求；没有统计显著性、置信区间和前端评测页面，后者属于 Phase 8。
+- 记忆评测基于当前用户已有 ACTIVE 记忆，会更新命中记忆的 `lastUsedAt`；没有独立的评测沙箱数据。
+- 没有登录认证和前端业务页面，这些属于后续阶段。
 
 ## 常见问题
 
