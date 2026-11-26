@@ -27,6 +27,7 @@ import com.teammind.knowledge.application.KnowledgeBaseService;
 import com.teammind.memory.application.ConversationService;
 import com.teammind.memory.domain.StoredMessage;
 import com.teammind.observability.application.RagTraceService;
+import com.teammind.observability.application.RagTraceService.SpanHandle;
 import com.teammind.observability.domain.RagTrace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,10 +114,12 @@ public class ReActAgentService {
         try {
             AgentAnswer answer = run(request, observer, streamAnswer, trace, traceId,
                     knowledgeBaseIds, documentIds, deadline, conversationId);
-            traceService.finish(trace.getId(), true, elapsedMillis(startedAt), answer.answer());
+            traceService.finish(trace.getId(), true, elapsedMillis(startedAt), answer.answer(),
+                    answer.usage().inputTokens(), answer.usage().outputTokens(), null);
             return answer;
         } catch (RuntimeException exception) {
-            traceService.finish(trace.getId(), false, elapsedMillis(startedAt), null);
+            traceService.finish(trace.getId(), false, elapsedMillis(startedAt), null,
+                    0, 0, exception.getMessage());
             throw exception;
         }
     }
@@ -125,12 +128,33 @@ public class ReActAgentService {
             RagTrace trace, String traceId, List<Long> knowledgeBaseIds, List<Long> documentIds,
             long deadline, String conversationId) {
         List<String> warnings = new ArrayList<>();
-        ConversationContext conversation = conversationSummaryService.load(conversationId,
-                request.ownerId(), request.history());
+        SpanHandle memorySpan = traceService.startSpan(traceId, null, "MEMORY_CONTEXT",
+                "conversation=" + conversationId);
+        ConversationContext conversation;
+        try {
+            conversation = conversationSummaryService.load(conversationId, request.ownerId(),
+                    request.history());
+            traceService.finishSpan(memorySpan, "SUCCESS", "messages=" + conversation.messages().size(),
+                    null, null, conversation.usage().inputTokens(), conversation.usage().outputTokens());
+        } catch (RuntimeException exception) {
+            traceService.failSpan(memorySpan, "MEMORY_ERROR", exception.getMessage());
+            throw exception;
+        }
         warnings.addAll(conversation.warnings());
         TaskContext taskContext = new TaskContext(request.message(), request.ownerId(), knowledgeBaseIds,
                 documentIds, conversation.messages(), conversation.summary());
-        TaskUnderstanding task = understandingService.understand(taskContext);
+        SpanHandle taskSpan = traceService.startSpan(traceId, null, "TASK_UNDERSTANDING",
+                "questionLength=" + request.message().length());
+        TaskUnderstanding task;
+        try {
+            task = understandingService.understand(taskContext);
+            traceService.finishSpan(taskSpan, "SUCCESS", "taskType=" + task.taskType()
+                            + ", confidence=" + task.confidence(), null, null,
+                    task.usage().inputTokens(), task.usage().outputTokens());
+        } catch (RuntimeException exception) {
+            traceService.failSpan(taskSpan, "TASK_UNDERSTANDING_ERROR", exception.getMessage());
+            throw exception;
+        }
         traceService.updateStrategy(trace.getId(), "AGENT:" + task.taskType());
         observer.onTask(task);
 
@@ -150,7 +174,7 @@ public class ReActAgentService {
         TerminationReason termination = null;
         int toolCallCount = 0;
         int consecutiveFailures = 0;
-        ModelUsage usage = ModelUsage.empty();
+        ModelUsage usage = conversation.usage().plus(task.usage());
 
         for (int iteration = 1; iteration <= properties.maxIterations(); iteration++) {
             if (deadlineExceeded(deadline)) {
@@ -158,10 +182,16 @@ public class ReActAgentService {
                 break;
             }
             AgentModelResponse response;
+            SpanHandle decisionSpan = traceService.startSpan(traceId, null, "AGENT_DECISION",
+                    "iteration=" + iteration + ", messages=" + messages.size());
             try {
                 response = modelGateway.complete(new AgentModelRequest(
                         AgentPrompts.REACT_SYSTEM_PROMPT, messages, toolSpecs, false));
+                traceService.finishSpan(decisionSpan, "SUCCESS",
+                        "toolCalls=" + response.toolCalls().size(), null, null,
+                        response.usage().inputTokens(), response.usage().outputTokens());
             } catch (RuntimeException exception) {
+                traceService.failSpan(decisionSpan, "MODEL_ERROR", exception.getMessage());
                 if (steps.isEmpty() && finalContent == null) {
                     // 第一次模型调用就失败，说明 Agent 无法启动，按依赖服务不可用返回。
                     throw exception;
@@ -190,14 +220,19 @@ public class ReActAgentService {
             boolean stopForLimit = false;
             boolean stopForTimeout = false;
             for (AgentToolCall call : response.toolCalls()) {
+                SpanHandle toolSpan = traceService.startSpan(traceId,
+                        decisionSpan == null ? null : decisionSpan.spanId(), "TOOL_CALL",
+                        call.name() + " " + abbreviate(call.arguments(), 300));
                 if (toolCallCount >= properties.maxToolCalls()) {
                     // 未执行的调用也必须回填 tool 消息，保持 OpenAI 工具调用协议完整。
                     messages.add(AgentMessage.tool(call.id(), "未执行：已达到工具调用次数上限。"));
+                    traceService.failSpan(toolSpan, "TOOL_LIMIT", "未执行：已达到工具调用次数上限。");
                     stopForLimit = true;
                     continue;
                 }
                 if (deadlineExceeded(deadline)) {
                     messages.add(AgentMessage.tool(call.id(), "未执行：本次执行已超时。"));
+                    traceService.failSpan(toolSpan, "AGENT_TIMEOUT", "未执行：本次执行已超时。");
                     stopForTimeout = true;
                     stopForLimit = true;
                     continue;
@@ -205,6 +240,7 @@ public class ReActAgentService {
                 toolCallCount++;
                 if (call.name() == null || call.name().isBlank()) {
                     messages.add(AgentMessage.tool(call.id(), "未执行：工具名称不能为空。"));
+                    traceService.failSpan(toolSpan, "INVALID_TOOL", "工具名称不能为空");
                     consecutiveFailures++;
                     continue;
                 }
@@ -216,6 +252,7 @@ public class ReActAgentService {
                     addStep(steps, observer, AgentStepType.OBSERVATION, call.name(), tooLarge.content(),
                             false, 0);
                     messages.add(AgentMessage.tool(call.id(), tooLarge.content()));
+                    traceService.failSpan(toolSpan, "ARGUMENTS_TOO_LARGE", tooLarge.content());
                     consecutiveFailures++;
                     continue;
                 }
@@ -226,6 +263,12 @@ public class ReActAgentService {
                         abbreviate(execution.result().content(), STEP_CONTENT_CHARS),
                         execution.result().success(), execution.durationMillis());
                 messages.add(AgentMessage.tool(call.id(), execution.result().content()));
+                String errorType = execution.result().success() ? null
+                        : String.valueOf(execution.result().metadata().getOrDefault("error", "TOOL_FAILED"));
+                traceService.finishSpan(toolSpan,
+                        execution.result().success() ? "SUCCESS" : "FAILED",
+                        abbreviate(execution.result().content(), 1000), errorType,
+                        execution.result().success() ? null : execution.result().content(), 0, 0);
                 if (execution.result().success()) {
                     consecutiveFailures = 0;
                 } else {
@@ -249,6 +292,8 @@ public class ReActAgentService {
             warnings.add("达到最大推理轮数，已基于现有观察生成最终答案。");
         }
 
+        SpanHandle finalSpan = traceService.startSpan(traceId, null, "FINAL_ANSWER",
+                "termination=" + termination);
         FinalAnswer finalAnswer;
         if (finalContent != null) {
             if (streamAnswer) {
@@ -275,6 +320,11 @@ public class ReActAgentService {
         if (finalAnswer.degraded() && termination == TerminationReason.COMPLETED) {
             termination = TerminationReason.MODEL_ERROR;
         }
+        traceService.finishSpan(finalSpan, finalAnswer.degraded() ? "FAILED" : "SUCCESS",
+                "answerLength=" + finalAnswer.answer().length(),
+                finalAnswer.degraded() ? "MODEL_FALLBACK" : null,
+                finalAnswer.degraded() ? "最终答案使用降级回答" : null,
+                finalAnswer.usage().inputTokens(), finalAnswer.usage().outputTokens());
         evidenceRecorder.markCitations(traceId, evidence.chunkIds(finalAnswer.citedIndexes()));
         saveConversation(conversationId, request, traceId, finalAnswer.answer(), warnings);
         warnings = new ArrayList<>(new LinkedHashSet<>(warnings));

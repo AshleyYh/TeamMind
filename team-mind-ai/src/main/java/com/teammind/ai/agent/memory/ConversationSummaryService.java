@@ -45,6 +45,7 @@ public class ConversationSummaryService {
             return ConversationContext.fallback(null, fallbackHistory);
         }
         List<String> warnings = new ArrayList<>();
+        com.teammind.ai.agent.model.ModelUsage usage = com.teammind.ai.agent.model.ModelUsage.empty();
         try {
             List<StoredMessage> stored = conversationService.loadMessages(conversationId, ownerId,
                     properties.maxMessages());
@@ -60,11 +61,14 @@ public class ConversationSummaryService {
                 int oldCount = stored.size() - contextMessages;
                 List<StoredMessage> oldMessages = stored.subList(0, oldCount);
                 try {
-                    String merged = chatGateway.generate(MemoryPrompts.SUMMARY_SYSTEM_PROMPT,
+                    var completion = chatGateway.generateWithUsage(MemoryPrompts.SUMMARY_SYSTEM_PROMPT,
                             MemoryPrompts.buildSummaryContent(summary, oldMessages));
+                    String merged = completion.content();
                     if (merged == null || merged.isBlank()) {
                         throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "摘要模型未返回有效内容");
                     }
+                    usage = new com.teammind.ai.agent.model.ModelUsage(completion.inputTokens(),
+                            completion.outputTokens());
                     summary = abbreviate(merged.trim(), properties.maxSummaryChars());
                     summarizedMessages += oldCount;
                     conversationService.saveSummary(conversationId, ownerId,
@@ -80,11 +84,12 @@ public class ConversationSummaryService {
             List<ConversationMessage> messages = stored.stream()
                     .map(message -> new ConversationMessage(message.role(), message.content()))
                     .toList();
-            return new ConversationContext(conversationId, summary, messages, warnings);
+            return new ConversationContext(conversationId, summary, messages, warnings, usage);
         } catch (BusinessException exception) {
             log.warn("会话记忆读取失败，已降级为请求历史：conversationId={}", conversationId);
             warnings.add("会话记忆暂不可用，本次仅使用请求携带的历史。");
-            return new ConversationContext(conversationId, null, fallbackHistory, warnings);
+            return new ConversationContext(conversationId, null, fallbackHistory, warnings,
+                    com.teammind.ai.agent.model.ModelUsage.empty());
         }
     }
 

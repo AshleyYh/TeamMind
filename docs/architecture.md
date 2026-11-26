@@ -1,10 +1,10 @@
-# TeamMind 当前架构说明（Phase 5）
+# TeamMind 当前架构说明（Phase 6）
 
 ## 目标与边界
 
-Phase 5 在 Phase 4 Agent 之上实现三层记忆：Redis 短期会话记忆、增量摘要和 PostgreSQL 长期记忆。Agent 通过 `conversationId` 加载最近消息与摘要，回答后写回短期记忆；长期记忆由会话显式提取为 DRAFT，经用户确认变为 ACTIVE 后由 `historyMemorySearch` 工具检索。
+Phase 6 在 Phase 5 记忆系统之上实现可观测性：Trace/Span、Agent 节点、工具调用、RAG 检索、记忆上下文、Token、耗时、失败节点和 Trace 查询接口。每个 Agent、RAG 问答和独立检索请求都有唯一 `traceId`，可以通过 API 查看完整执行链路。
 
-本阶段仍不包含完整 Span/Token 追踪、量化评测、登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数，不是身份认证。短期记忆依赖 Redis，长期记忆检索暂用关键词和中文二元词，不引入向量检索。
+本阶段仍不包含量化评测、登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数，不是身份认证。Trace 只保存摘要，不保存完整提示词、文档正文或密钥。
 
 ## 模块与依赖
 
@@ -26,6 +26,16 @@ memory/domain       Conversation、Memory、StoredMessage、ConversationSummary�
 memory/application  ConversationService、MemoryService
 memory/mapper       ConversationMapper、MemoryMapper
 ```
+
+`team-mind-observability` 负责 Trace/Span 持久化和查询：
+
+```text
+observability/domain       RagTrace、TraceSpan、Evidence
+observability/application  RagTraceService、EvidenceService、RetrievalTraceRecorderAdapter
+observability/mapper       RagTraceMapper、TraceSpanMapper、EvidenceMapper
+```
+
+`RagTraceService` 提供 Trace 创建/收尾、Span 开始/结束、一次性 Span 写入和 Trace/Span 查询。Span 写入失败开放，只记录日志，不影响业务回答。
 
 `team-mind-ai` 的 `agent` 包负责任务理解、工具和 ReAct，并通过 `ConversationSummaryService`、`MemoryExtractionService` 使用记忆模块：
 
@@ -73,6 +83,44 @@ Agent 请求（conversationId）
 ```
 
 `historyMemorySearch` 的 `记忆#n` 不是文档引用编号；只有 `knowledgeSearch` 等工具返回的 `证据 [n]` 才能作为最终答案的文档引用。
+
+## 可观测性
+
+### Trace 与 Span
+
+- `ai_trace` 保存一次请求的 traceId、用户、会话、状态、策略、问题、回答、总耗时、输入/输出/总 Token、错误信息和结束时间。
+- `ai_trace_span` 保存执行节点：`spanId`、`parentSpanId`、`spanType`、状态、耗时、输入/输出 Token、错误类型、错误信息、输入/输出摘要和创建时间。
+- 父节点通过 `parentSpanId` 关联，例如 `AGENT_DECISION` 下的 `TOOL_CALL`。`RAG_RETRIEVAL` 由知识模块通过端口写入，目前作为根节点，不与 `TOOL_CALL` 嵌套。
+
+### 记录节点
+
+| Span 类型 | 来源 | 内容 |
+| --- | --- | --- |
+| `MEMORY_CONTEXT` | Agent | 会话消息、增量摘要、摘要模型 Token |
+| `TASK_UNDERSTANDING` | Agent | 任务分类、置信度、任务理解 Token |
+| `AGENT_DECISION` | Agent | 每轮 Function Calling 决策、工具数量、模型 Token |
+| `TOOL_CALL` | Agent | 工具名、参数摘要、结果摘要、失败类型和耗时 |
+| `RAG_RETRIEVAL` | 知识模块 | 查询、策略、结果数、检索耗时和失败信息 |
+| `LLM_GENERATION` | 直接 RAG | 生成耗时、输入/输出 Token |
+| `FINAL_ANSWER` | Agent | 最终答案长度、是否降级、生成 Token |
+
+### Token 与耗时
+
+- Qwen Chat 网关解析 OpenAI 兼容响应的 `usage.prompt_tokens` / `usage.completion_tokens`。
+- Agent 汇总记忆摘要、任务理解、每轮决策和最终答案的 Token，写入 `ai_trace`。
+- 每个模型 Span 记录自己的输入/输出 Token；每个业务 Span 记录自己的耗时。
+- 失败请求保留已消耗 Token 和错误信息；首次模型调用失败也会写入失败 Trace。
+
+### 查询 API
+
+```text
+GET /api/v1/traces?ownerId=1&limit=20
+GET /api/v1/traces/{traceId}?ownerId=1
+GET /api/v1/traces/{traceId}/spans?ownerId=1
+GET /api/v1/traces/{traceId}/evidences?ownerId=1
+```
+
+Trace 详情返回主记录和平铺 Span；客户端可按 `parentSpanId` 构建时间线。查询前先校验 Trace 归属，避免跨用户读取。
 
 ## Agent 处理链路
 
@@ -179,5 +227,7 @@ ReAct 决策与工具调用使用非流式模型调用，保证工具协议完�
 - `documentSearch` 因底层检索暂不支持按文档下推过滤，采用扩大候选集后精确过滤，可能遗漏候选集之外的文档分块。
 - 长期记忆检索使用关键词和中文二元词，没有向量召回；大记忆量场景需要后续增加 Embedding 或全文索引。
 - 长期记忆提取需要显式调用接口并人工确认，尚未实现自动提取和前端审批页面。
-- 完整执行 Span、Agent 监控页面和身份认证仍属于后续阶段。
+- Trace/Span 已落库并提供查询 API；前端时间线、Agent 监控页面和身份认证属于 Phase 8。
+- Span 只保存摘要，完整提示词和文档正文不会写入 Trace 表；Span 写入失败开放，可能缺少部分节点。
+- 记忆提取和摘要的 Token 用量计入 Agent Trace；单独调用记忆提取接口目前不创建独立 Trace。
 - SSE 连接可能受反向代理空闲超时影响，生产部署需要配置代理缓冲和超时。

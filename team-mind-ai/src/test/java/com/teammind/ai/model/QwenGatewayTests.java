@@ -56,6 +56,21 @@ class QwenGatewayTests {
         assertThat(gateway.generate("系统规则", "用户问题")).isEqualTo("最大连接数为30 [1]");
     }
 
+    @Test
+    void 对话模型解析Token用量() throws Exception {
+        startServer("/chat/completions", 200, """
+                {"choices":[{"message":{"content":"最大连接数为30 [1]"}}],
+                 "usage":{"prompt_tokens":11,"completion_tokens":7}}
+                """);
+        QwenChatGateway gateway = new QwenChatGateway(properties(), RestClient.builder());
+
+        var result = gateway.generateWithUsage("系统规则", "用户问题");
+
+        assertThat(result.content()).isEqualTo("最大连接数为30 [1]");
+        assertThat(result.inputTokens()).isEqualTo(11);
+        assertThat(result.outputTokens()).isEqualTo(7);
+    }
+
     private void startServer(String path, int status, String body) throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext(path, exchange -> respond(exchange, status, body));

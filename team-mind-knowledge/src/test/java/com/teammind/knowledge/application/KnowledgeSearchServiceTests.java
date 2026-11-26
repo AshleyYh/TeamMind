@@ -2,6 +2,7 @@ package com.teammind.knowledge.application;
 
 import com.teammind.knowledge.api.EvidenceRecorder;
 import com.teammind.knowledge.api.RerankerGateway;
+import com.teammind.knowledge.api.RetrievalTraceRecorder;
 import com.teammind.knowledge.api.RetrievedChunk;
 import com.teammind.knowledge.api.SearchStrategy;
 import com.teammind.knowledge.config.QdrantKnowledgeProperties;
@@ -31,11 +32,12 @@ class KnowledgeSearchServiceTests {
     private final KnowledgeBaseService knowledgeBaseService = mock(KnowledgeBaseService.class);
     private final RerankerGateway reranker = mock(RerankerGateway.class);
     private final EvidenceRecorder recorder = mock(EvidenceRecorder.class);
+    private final RetrievalTraceRecorder traceRecorder = mock(RetrievalTraceRecorder.class);
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final KnowledgeSearchService service = new KnowledgeSearchService(dense, bm25, knowledgeBaseService,
             new QdrantKnowledgeProperties("test", 2, 5, 0.0),
             new RetrievalProperties(20, 20, 20, SearchStrategy.HYBRID_RERANK, 60, 64, Duration.ofSeconds(2)),
-            new ReciprocalRankFusion(), reranker, recorder, executor);
+            new ReciprocalRankFusion(), reranker, recorder, traceRecorder, executor);
 
     @Test
     void 混合重排保留名次且限制最终数量() {
@@ -53,6 +55,9 @@ class KnowledgeSearchServiceTests {
             assertThat(chunk.rerankScore()).isEqualTo(0.9);
         });
         verify(recorder).record(anyString(), any(), anyString(), anyList(), any(), anyList());
+        verify(traceRecorder).record(anyString(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.eq(true),
+                org.mockito.ArgumentMatchers.isNull());
         executor.shutdownNow();
     }
 

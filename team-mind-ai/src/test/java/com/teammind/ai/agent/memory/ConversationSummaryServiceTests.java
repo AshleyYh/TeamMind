@@ -34,13 +34,16 @@ class ConversationSummaryServiceTests {
     void 超过阈值时合并摘要并裁剪旧消息() {
         when(conversationService.loadMessages("conv_1", 1L, 100)).thenReturn(messages(50));
         when(conversationService.getSummary("conv_1", 1L)).thenReturn(null);
-        when(chatGateway.generate(anyString(), anyString())).thenReturn("  合并后的摘要  ");
+        when(chatGateway.generateWithUsage(anyString(), anyString()))
+                .thenReturn(new ChatCompletionGateway.ChatCompletionResult("  合并后的摘要  ", 3, 4));
 
         ConversationContext context = service.load("conv_1", 1L, List.of());
 
         assertThat(context.summary()).isEqualTo("合并后的摘要");
         assertThat(context.messages()).hasSize(20);
         assertThat(context.warnings()).isEmpty();
+        assertThat(context.usage().inputTokens()).isEqualTo(3);
+        assertThat(context.usage().outputTokens()).isEqualTo(4);
         verify(conversationService).saveSummary(eq("conv_1"), eq(1L), argThat(summary ->
                 summary.summarizedMessages() == 30 && summary.summary().equals("合并后的摘要")));
         verify(conversationService).trimOldest("conv_1", 1L, 20);
@@ -55,14 +58,14 @@ class ConversationSummaryServiceTests {
 
         assertThat(context.messages()).hasSize(10);
         assertThat(context.summary()).isNull();
-        verify(chatGateway, never()).generate(anyString(), anyString());
+        verify(chatGateway, never()).generateWithUsage(anyString(), anyString());
     }
 
     @Test
     void 摘要失败时保留历史并返回警告() {
         when(conversationService.loadMessages("conv_1", 1L, 100)).thenReturn(messages(50));
         when(conversationService.getSummary("conv_1", 1L)).thenReturn(null);
-        when(chatGateway.generate(anyString(), anyString()))
+        when(chatGateway.generateWithUsage(anyString(), anyString()))
                 .thenThrow(new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "模型不可用"));
 
         ConversationContext context = service.load("conv_1", 1L, List.of());
@@ -77,8 +80,8 @@ class ConversationSummaryServiceTests {
         when(conversationService.loadMessages("conv_1", 1L, 100)).thenReturn(messages(50));
         when(conversationService.getSummary("conv_1", 1L))
                 .thenReturn(new ConversationSummary("旧摘要", 10, "2026-01-01T00:00:00"));
-        when(chatGateway.generate(anyString(), org.mockito.ArgumentMatchers.contains("旧摘要")))
-                .thenReturn("新摘要");
+        when(chatGateway.generateWithUsage(anyString(), org.mockito.ArgumentMatchers.contains("旧摘要")))
+                .thenReturn(new ChatCompletionGateway.ChatCompletionResult("新摘要", 2, 3));
 
         ConversationContext context = service.load("conv_1", 1L, List.of());
 

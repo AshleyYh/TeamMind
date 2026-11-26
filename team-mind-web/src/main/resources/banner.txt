@@ -4,4 +4,4 @@
    | |  __/ (_| | | | | | || |  | | | | | | (_| |
    |_|\___|\__,_|_| |_| |_||_|  |_|_|_| |_|\__,_|
 
-:: TeamMind :: Phase 5 - Memory System :: Spring Boot ${spring-boot.version} ::
+:: TeamMind :: Phase 6 - Observability :: Spring Boot ${spring-boot.version} ::

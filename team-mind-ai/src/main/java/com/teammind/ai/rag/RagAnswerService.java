@@ -47,30 +47,51 @@ public class RagAnswerService {
         long startedAt = System.nanoTime();
         RagTrace trace = traceService.start(traceId, ownerId, query, knowledgeBaseIds,
                 strategy == null ? null : strategy.name());
+        int inputTokens = 0;
+        int outputTokens = 0;
         try {
             RetrievalResult retrieval = searchService.searchWithTrace(query, knowledgeBaseIds, ownerId, topK,
                     strategy, traceId);
             traceService.updateStrategy(trace.getId(), retrieval.strategy());
             if (retrieval.chunks().isEmpty()) {
                 String answer = "当前知识库没有找到足够依据回答该问题。";
-                traceService.finish(trace.getId(), true, (System.nanoTime() - startedAt) / 1_000_000, answer);
+                traceService.finish(trace.getId(), true, elapsedMillis(startedAt), answer, 0, 0, null);
                 return new RagAnswer(answer, List.of(), traceId, retrieval.strategy());
             }
-            // 引用编号由服务端固定生成，不接受模型传入的文档 ID 或任意引用位置。
-            String answer = chatGateway.generate(RagPrompts.SYSTEM_PROMPT,
-                    RagPrompts.buildUserContent(query, retrieval.chunks()));
+            RagTraceService.SpanHandle llmSpan = traceService.startSpan(traceId, null, "LLM_GENERATION",
+                    "RAG answer, evidence=" + retrieval.chunks().size());
+            ChatCompletionGateway.ChatCompletionResult completion;
+            try {
+                // 引用编号由服务端固定生成，不接受模型传入的文档 ID 或任意引用位置。
+                completion = chatGateway.generateWithUsage(RagPrompts.SYSTEM_PROMPT,
+                        RagPrompts.buildUserContent(query, retrieval.chunks()));
+            } catch (RuntimeException exception) {
+                traceService.failSpan(llmSpan, "MODEL_ERROR", exception.getMessage());
+                throw exception;
+            }
+            inputTokens = completion.inputTokens();
+            outputTokens = completion.outputTokens();
+            String answer = completion.content();
+            traceService.finishSpan(llmSpan, "SUCCESS", "answerLength=" + answer.length(),
+                    null, null, inputTokens, outputTokens);
             Set<Integer> indexes = CitationValidator.validate(answer, retrieval.chunks().size());
             List<Citation> citations = java.util.stream.IntStream.range(0, retrieval.chunks().size())
                     .mapToObj(index -> toCitation(index + 1, retrieval.chunks().get(index))).toList();
             evidenceRecorder.markCitations(traceId, indexes.stream()
                     .map(index -> retrieval.chunks().get(index - 1).chunkId())
                     .collect(java.util.stream.Collectors.toSet()));
-            traceService.finish(trace.getId(), true, (System.nanoTime() - startedAt) / 1_000_000, answer);
+            traceService.finish(trace.getId(), true, elapsedMillis(startedAt), answer,
+                    inputTokens, outputTokens, null);
             return new RagAnswer(answer, citations, traceId, retrieval.strategy());
         } catch (RuntimeException exception) {
-            traceService.finish(trace.getId(), false, (System.nanoTime() - startedAt) / 1_000_000, null);
+            traceService.finish(trace.getId(), false, elapsedMillis(startedAt), null,
+                    inputTokens, outputTokens, exception.getMessage());
             throw exception;
         }
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 
     private Citation toCitation(int index, RetrievedChunk chunk) {

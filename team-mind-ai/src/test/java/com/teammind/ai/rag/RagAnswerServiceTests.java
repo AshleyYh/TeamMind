@@ -10,7 +10,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -52,7 +55,8 @@ class RagAnswerServiceTests {
         when(searchService.searchWithTrace(anyString(), any(), any(), any(), any(), anyString()))
                 .thenReturn(new com.teammind.knowledge.api.RetrievalResult("trace",
                         com.teammind.knowledge.api.SearchStrategy.HYBRID, List.of(chunk)));
-        when(chatGateway.generate(anyString(), anyString())).thenReturn("最大连接数为30 [1]");
+        when(chatGateway.generateWithUsage(anyString(), anyString()))
+                .thenReturn(new ChatCompletionGateway.ChatCompletionResult("最大连接数为30 [1]", 10, 5));
 
         var result = service.answer("最大连接数？", List.of(1L), 1L, 5);
 
@@ -63,9 +67,12 @@ class RagAnswerServiceTests {
             assertThat(citation.documentId()).isEqualTo(22L);
             assertThat(citation.pageNumber()).isEqualTo(3);
         });
-        verify(chatGateway).generate(anyString(), org.mockito.ArgumentMatchers.contains("最大连接数为30"));
+        verify(chatGateway).generateWithUsage(anyString(),
+                org.mockito.ArgumentMatchers.contains("最大连接数为30"));
         verify(evidenceRecorder).markCitations(org.mockito.ArgumentMatchers.eq(result.traceId()),
                 org.mockito.ArgumentMatchers.eq(java.util.Set.of(11L)));
+        verify(traceService).finish(eq(99L), eq(true), anyLong(), eq("最大连接数为30 [1]"),
+                eq(10), eq(5), isNull());
     }
 
     @Test
@@ -75,7 +82,8 @@ class RagAnswerServiceTests {
         when(searchService.searchWithTrace(anyString(), any(), any(), any(), any(), anyString()))
                 .thenReturn(new com.teammind.knowledge.api.RetrievalResult("trace",
                         com.teammind.knowledge.api.SearchStrategy.HYBRID, List.of(chunk)));
-        when(chatGateway.generate(anyString(), anyString())).thenReturn("错误引用 [2]");
+        when(chatGateway.generateWithUsage(anyString(), anyString()))
+                .thenReturn(new ChatCompletionGateway.ChatCompletionResult("错误引用 [2]", 10, 5));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> service.answer("最大连接数？", List.of(1L), 1L, 5))

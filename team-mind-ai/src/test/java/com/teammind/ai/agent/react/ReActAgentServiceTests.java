@@ -40,6 +40,7 @@ import java.util.function.Consumer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -91,8 +92,14 @@ class ReActAgentServiceTests {
         assertThat(answer.answer()).contains("TeamMind");
         assertThat(answer.steps()).isEmpty();
         assertThat(answer.citations()).isEmpty();
+        assertThat(answer.usage().inputTokens()).isEqualTo(10);
+        assertThat(answer.usage().outputTokens()).isEqualTo(5);
         verify(toolRegistry, never()).execute(anyString(), anyString(), any());
-        verify(traceService).finish(eq(99L), eq(true), anyLong(), eq("你好，我是 TeamMind。"));
+        verify(traceService).startSpan(anyString(), isNull(), eq("TASK_UNDERSTANDING"), anyString());
+        verify(traceService).startSpan(anyString(), isNull(), eq("AGENT_DECISION"), anyString());
+        verify(traceService).startSpan(anyString(), isNull(), eq("FINAL_ANSWER"), anyString());
+        verify(traceService).finish(eq(99L), eq(true), anyLong(), eq("你好，我是 TeamMind。"),
+                anyInt(), anyInt(), isNull());
     }
 
     @Test
@@ -340,7 +347,8 @@ class ReActAgentServiceTests {
 
         assertThatThrownBy(() -> service(properties()).chat(request("最大连接数？", List.of(1L))))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("模型不可用");
-        verify(traceService).finish(eq(99L), eq(false), anyLong(), isNull());
+        verify(traceService).finish(eq(99L), eq(false), anyLong(), isNull(),
+                anyInt(), anyInt(), org.mockito.ArgumentMatchers.contains("模型不可用"));
     }
 
     private ReActAgentService service(AgentProperties properties) {

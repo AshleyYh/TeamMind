@@ -84,7 +84,7 @@ management:
 info:
   application:
     name: TeamMind
-    phase: Phase 5 - Memory System
+    phase: Phase 6 - Observability
 
 teammind:
   qdrant:

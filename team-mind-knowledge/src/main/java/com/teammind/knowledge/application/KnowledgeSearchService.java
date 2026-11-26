@@ -5,6 +5,7 @@ import com.teammind.common.exception.BusinessException;
 import com.teammind.knowledge.api.EvidenceRecorder;
 import com.teammind.knowledge.api.RerankerGateway;
 import com.teammind.knowledge.api.RetrievalResult;
+import com.teammind.knowledge.api.RetrievalTraceRecorder;
 import com.teammind.knowledge.api.RetrievedChunk;
 import com.teammind.knowledge.api.SearchStrategy;
 import com.teammind.knowledge.config.QdrantKnowledgeProperties;
@@ -32,12 +33,14 @@ public class KnowledgeSearchService {
     private final ReciprocalRankFusion fusion;
     private final RerankerGateway reranker;
     private final EvidenceRecorder evidenceRecorder;
+    private final RetrievalTraceRecorder traceRecorder;
     private final ExecutorService retrievalTaskExecutor;
 
     public KnowledgeSearchService(DenseRetrievalService denseRetrieval, Bm25RetrievalService bm25Retrieval,
             KnowledgeBaseService knowledgeBaseService, QdrantKnowledgeProperties vectorProperties,
             RetrievalProperties properties, ReciprocalRankFusion fusion, RerankerGateway reranker,
-            EvidenceRecorder evidenceRecorder, ExecutorService retrievalTaskExecutor) {
+            EvidenceRecorder evidenceRecorder, RetrievalTraceRecorder traceRecorder,
+            ExecutorService retrievalTaskExecutor) {
         this.denseRetrieval = denseRetrieval;
         this.bm25Retrieval = bm25Retrieval;
         this.knowledgeBaseService = knowledgeBaseService;
@@ -46,6 +49,7 @@ public class KnowledgeSearchService {
         this.fusion = fusion;
         this.reranker = reranker;
         this.evidenceRecorder = evidenceRecorder;
+        this.traceRecorder = traceRecorder;
         this.retrievalTaskExecutor = retrievalTaskExecutor;
     }
 
@@ -67,17 +71,30 @@ public class KnowledgeSearchService {
         knowledgeBaseService.getAccessible(knowledgeBaseIds, ownerId);
         int limit = topK == null ? vectorProperties.topK() : Math.min(Math.max(topK, 1), 20);
         SearchStrategy strategy = requestedStrategy == null ? properties.defaultStrategy() : requestedStrategy;
-        List<RetrievedChunk> results = switch (strategy) {
-            case DENSE -> denseRetrieval.retrieve(query, knowledgeBaseIds, ownerId,
-                    Math.min(properties.denseCandidateSize(), limit), vectorProperties.scoreThreshold());
-            case BM25 -> bm25Retrieval.retrieve(query, knowledgeBaseIds, ownerId,
-                    Math.min(properties.bm25CandidateSize(), limit));
-            case HYBRID, HYBRID_RERANK -> hybrid(query, knowledgeBaseIds, ownerId,
-                    strategy == SearchStrategy.HYBRID_RERANK);
-        };
-        List<RetrievedChunk> topResults = results.stream().limit(limit).toList();
-        evidenceRecorder.record(traceId, ownerId, query, knowledgeBaseIds, strategy, topResults);
-        return new RetrievalResult(traceId, strategy, topResults);
+        long startedAt = System.nanoTime();
+        try {
+            List<RetrievedChunk> results = switch (strategy) {
+                case DENSE -> denseRetrieval.retrieve(query, knowledgeBaseIds, ownerId,
+                        Math.min(properties.denseCandidateSize(), limit), vectorProperties.scoreThreshold());
+                case BM25 -> bm25Retrieval.retrieve(query, knowledgeBaseIds, ownerId,
+                        Math.min(properties.bm25CandidateSize(), limit));
+                case HYBRID, HYBRID_RERANK -> hybrid(query, knowledgeBaseIds, ownerId,
+                        strategy == SearchStrategy.HYBRID_RERANK);
+            };
+            List<RetrievedChunk> topResults = results.stream().limit(limit).toList();
+            evidenceRecorder.record(traceId, ownerId, query, knowledgeBaseIds, strategy, topResults);
+            traceRecorder.record(traceId, query, strategy.name(), elapsedMillis(startedAt),
+                    topResults.size(), true, null);
+            return new RetrievalResult(traceId, strategy, topResults);
+        } catch (RuntimeException exception) {
+            traceRecorder.record(traceId, query, strategy.name(), elapsedMillis(startedAt),
+                    0, false, exception.getMessage());
+            throw exception;
+        }
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 
     private long remainingMillis(long deadline) throws TimeoutException {

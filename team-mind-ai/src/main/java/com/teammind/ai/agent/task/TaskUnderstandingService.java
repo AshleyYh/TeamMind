@@ -55,7 +55,7 @@ public class TaskUnderstandingService {
                     AgentPrompts.taskSystemPrompt(tools),
                     List.of(AgentMessage.user(AgentPrompts.buildTaskUserContent(context))),
                     List.of(), true));
-            return parse(context, rule, response.content());
+            return parse(context, rule, response.content(), response.usage());
         } catch (RuntimeException exception) {
             log.warn("任务理解模型不可用，使用规则降级：{}", exception.getMessage());
             return fallback(rule, "任务理解模型不可用或返回内容不合法，已使用规则分类");
@@ -74,7 +74,8 @@ public class TaskUnderstandingService {
                 defaultTools(type), 0.9, true, rule.warnings());
     }
 
-    private TaskUnderstanding parse(TaskContext context, RulePreprocessor.RuleResult rule, String content) {
+    private TaskUnderstanding parse(TaskContext context, RulePreprocessor.RuleResult rule, String content,
+            com.teammind.ai.agent.model.ModelUsage usage) {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("任务理解结果为空");
         }
@@ -114,7 +115,7 @@ public class TaskUnderstandingService {
             requiredTools = List.of();
         }
         return new TaskUnderstanding(type, userIntent, entities, keywords, knowledgeBaseIds, timeRange,
-                requiredTools, confidence, false, warnings);
+                requiredTools, confidence, false, warnings, usage);
     }
 
     private TaskUnderstanding fallback(RulePreprocessor.RuleResult rule, String reason) {

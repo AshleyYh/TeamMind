@@ -1,10 +1,10 @@
 # TeamMind
 
-企业级研发知识库 Agent 平台。当前完成 **Phase 5：记忆系统**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、Redis 短期会话记忆和确认制长期记忆的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要和长期记忆确认/检索。
+企业级研发知识库 Agent 平台。当前完成 **Phase 6：可观测性**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、短期/长期记忆和全链路 Trace 的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要、长期记忆和 Trace/Span 追踪。
 
-完整链路追踪、量化评测、登录认证和前端业务页面尚未实现。
+量化评测、登录认证和前端业务页面尚未实现。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 5 验收记录](docs/phase5-verification.md)，Phase 4 历史验收见 [Phase 4 验收记录](docs/phase4-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 6 验收记录](docs/phase6-verification.md)，Phase 5 历史验收见 [Phase 5 验收记录](docs/phase5-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 当前进度
 
@@ -15,7 +15,8 @@
 | Phase 3 | ✅ 完成 | BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、BGE/Qwen Reranker、文档版本过滤、四种检索策略、Evidence Board |
 | Phase 4 | ✅ 完成 | 规则预处理、结构化任务理解、任务分类、Tool Registry、Function Calling、ReAct 执行循环、工具异常与超时、执行限制、SSE 流式回答 |
 | Phase 5 | ✅ 完成 | Redis 短期会话记忆、上下文裁剪、增量摘要、长期记忆提取/确认/更新/失效/检索、记忆来源追溯、Agent 连续对话 |
-| Phase 6+ | ⏳ 未开始 | 完整 Trace/Span、量化评测、登录认证、前端业务页面 |
+| Phase 6 | ✅ 完成 | Trace/Span、Agent 决策与工具节点、RAG 检索节点、Token/耗时统计、失败节点、Trace 查询接口 |
+| Phase 7+ | ⏳ 未开始 | 量化评测、登录认证、前端业务页面 |
 
 ## 已实现功能
 
@@ -48,7 +49,9 @@
 
 **长期记忆**：从会话中提取的稳定事实、偏好、决策和经验先保存为 `DRAFT` 候选，必须调用确认接口变为 `ACTIVE` 后才会被 Agent 的 `historyMemorySearch` 工具检索。每条记忆保存类型、标题、内容、摘要、置信度、版本、来源会话和来源 `traceId`；支持修改（版本递增）、失效、逻辑删除、按状态/类型查询和关键词检索。检索使用 ACTIVE 过滤和中文二元词召回，并更新 `lastUsedAt`。密码、密钥、令牌等敏感信息不会被提取。
 
-**基础设施与可观测性**：PostgreSQL 保存业务元数据、分块、检索词元、会话元数据和长期记忆；Qdrant 保存向量；Redis 保存短期会话消息、增量摘要，并提供健康检查；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
+**执行追踪**：每个 Agent、RAG 问答和独立检索请求都有 32 位十六进制 `traceId`。`ai_trace` 保存问题、会话、策略、状态、耗时、输入/输出 Token、回答和错误信息；`ai_trace_span` 保存 `MEMORY_CONTEXT`、`TASK_UNDERSTANDING`、`AGENT_DECISION`、`TOOL_CALL`、`RAG_RETRIEVAL`、`LLM_GENERATION`、`FINAL_ANSWER` 等节点，包含父子关系、状态、耗时、Token、输入/输出摘要和错误类型。失败节点可直接从 Trace 详情定位。Span 写入失败开放，不会因为观测数据库异常阻断回答。
+
+**基础设施与可观测性**：PostgreSQL 保存业务元数据、分块、检索词元、会话元数据、长期记忆、Trace 和 Span；Qdrant 保存向量；Redis 保存短期会话消息、增量摘要，并提供健康检查；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
 
 ## 技术基线
 
@@ -60,7 +63,7 @@ Java 21、Spring Boot 3.5.7、Maven 3.9.11、PostgreSQL 16、Redis 7、Qdrant 1.
 team-mind-web            Controller、启动类、应用配置、Swagger 配置
 team-mind-ai             Qwen 对话/Embedding 网关、RAG 问答编排、Agent 任务理解/工具/ReAct、提示词
 team-mind-knowledge      知识库、文档、分块、解析器、向量库、BM25、RRF、重排
-team-mind-observability  轻量 RAG Trace、Evidence Board、Qdrant 健康检查
+team-mind-observability  Trace/Span、Token/耗时统计、Evidence Board、Qdrant 健康检查
 team-mind-memory         Redis 短期会话、增量摘要存储、长期记忆与检索
 team-mind-common         统一响应、错误码、业务异常
 team-mind-system         用户与系统模块（Phase 1 骨架）
@@ -216,6 +219,15 @@ MyBatis-Plus 生成的是 19 位雪花编号，超过了 JavaScript 的 `Number.
 | POST | `/api/v1/chat/stream` | Agent SSE 流式对话，推送任务、步骤、答案增量和完成事件 | Body 同上；响应 `text/event-stream` |
 | GET | `/api/v1/evidence/{traceId}` | 查询一次请求的 Evidence 证据快照 | Path：`traceId`；Query：`ownerId` |
 
+### 执行追踪
+
+| 方法 | 路径 | 作用 | 主要参数 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/traces` | 查询最近 Trace 列表 | Query：`ownerId`、`limit` |
+| GET | `/api/v1/traces/{traceId}` | 查询 Trace 详情和全部 Span | Path：`traceId`；Query：`ownerId` |
+| GET | `/api/v1/traces/{traceId}/spans` | 查询平铺执行节点，可按 parentSpanId 构建树 | Path：`traceId`；Query：`ownerId` |
+| GET | `/api/v1/traces/{traceId}/evidences` | 查询该 Trace 的 Evidence | Path：`traceId`；Query：`ownerId` |
+
 ### 会话与长期记忆
 
 | 方法 | 路径 | 作用 | 主要参数 |
@@ -301,6 +313,14 @@ curl -X POST http://localhost:8080/api/v1/retrieval/search \
 ```bash
 curl 'http://localhost:8080/api/v1/evidence/替换为traceId?ownerId=1'
 ```
+
+查看一次请求的完整执行链路、节点耗时、Token 和失败节点：
+
+```bash
+curl 'http://localhost:8080/api/v1/traces/替换为traceId?ownerId=1'
+```
+
+Trace 详情中的 `spans` 是平铺列表，`parentSpanId` 表示父子关系；常用 `spanType` 包括 `MEMORY_CONTEXT`、`TASK_UNDERSTANDING`、`AGENT_DECISION`、`TOOL_CALL`、`RAG_RETRIEVAL`、`LLM_GENERATION` 和 `FINAL_ANSWER`。某节点失败时，`status=FAILED` 并带有 `errorType` 和 `errorMessage`。
 
 Agent 非流式对话会先做任务理解，再按需调用工具：
 
@@ -466,8 +486,9 @@ Flyway 在应用启动时自动执行 `team-mind-web/src/main/resources/db/migra
 - `V2__add_phase2_constraints.sql`：Phase 2 约束与索引
 - `V3__add_phase3_advanced_rag.sql`：BM25 检索词元、生成式 `tsvector`、GIN 索引，以及 Evidence 快照字段
 - `V4__add_phase5_memory.sql`：长期记忆标题、摘要、来源 Trace、置信度、使用时间和逻辑删除，以及检索索引
+- `V5__add_phase6_trace.sql`：Trace 输入/输出 Token、错误信息和结束时间，Span 输入/输出 Token、错误类型，以及查询索引
 
-Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Phase 5 通过 `ai_trace.conversation_id` 把 Trace 关联到会话。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V5__*.sql`。
+Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Phase 5 通过 `ai_trace.conversation_id` 把 Trace 关联到会话；Phase 6 使用 `ai_trace_span` 保存完整执行节点。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V6__*.sql`。
 
 ## 构建与测试
 
@@ -476,7 +497,7 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Ph
 ./mvnw test                 # 只运行单元测试
 ```
 
-默认单元与上下文测试共 **132 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、会话与记忆 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
+默认单元与上下文测试共 **141 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议和 Token 解析、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、Trace/Span 记录与查询、会话与记忆 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
 
 真实基础设施集成测试会使用独立端口和临时存储，结束后自动删除：
 
@@ -497,9 +518,11 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Ph
 - 长期记忆检索使用关键词和中文二元词，没有引入向量检索；大量记忆场景下后续可增加 Embedding 或全文索引。
 - 记忆提取必须通过 `POST /conversations/{id}/memories/extract` 显式触发，候选需要人工确认；尚未实现自动提取和前端审批页面。
 - 会话删除只清理 Redis 和会话元数据，长期记忆中的来源会话/Trace 字段会保留用于追溯。
-- Agent 执行步骤目前通过响应和 SSE 返回，尚未写入独立 Span/工具调用表；完整 Trace、Token 统计和前端执行监控属于 Phase 6 和 Phase 8。
+- Trace/Span 已落库并提供查询 API；前端 Trace 时间线和执行监控页面属于 Phase 8。
+- Trace 写入失败开放，观测数据库异常不会阻断回答，但可能缺少部分节点；Span 只记录摘要，完整提示词和文档正文不会写入 Trace 表。
+- 记忆提取和摘要的 Token 用量计入 Agent Trace；单独调用记忆提取接口目前不创建独立 Trace。
 - `documentSearch` 受底层检索能力限制，采用扩大候选集后按文档 ID 过滤的近似实现，大文档集下可能遗漏候选集之外的证据。
-- 没有完整 Span/Token 追踪、量化评测和前端业务页面，这些属于后续阶段。
+- 没有量化评测、登录认证和前端业务页面，这些属于后续阶段。
 
 ## 常见问题
 

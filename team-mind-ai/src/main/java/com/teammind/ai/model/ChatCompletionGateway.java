@@ -4,4 +4,15 @@ package com.teammind.ai.model;
 public interface ChatCompletionGateway {
 
     String generate(String systemPrompt, String userContent);
+
+    /**
+     * 带 Token 用量的生成方法。默认实现兼容只关心文本的模型/测试替身，
+     * 具体供应商可以覆盖并返回真实 usage。
+     */
+    default ChatCompletionResult generateWithUsage(String systemPrompt, String userContent) {
+        return new ChatCompletionResult(generate(systemPrompt, userContent), 0, 0);
+    }
+
+    record ChatCompletionResult(String content, int inputTokens, int outputTokens) {
+    }
 }

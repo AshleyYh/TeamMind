@@ -30,6 +30,11 @@ public class QwenChatGateway implements ChatCompletionGateway {
 
     @Override
     public String generate(String systemPrompt, String userContent) {
+        return generateWithUsage(systemPrompt, userContent).content();
+    }
+
+    @Override
+    public ChatCompletionResult generateWithUsage(String systemPrompt, String userContent) {
         if (properties.apiKey().isBlank()) {
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE,
                     "未配置 QWEN_API_KEY，无法调用对话模型");
@@ -47,7 +52,10 @@ public class QwenChatGateway implements ChatCompletionGateway {
                     || response.choices().getFirst().message().content().isBlank()) {
                 throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "模型未返回有效回答");
             }
-            return response.choices().getFirst().message().content();
+            Usage usage = response.usage();
+            return new ChatCompletionResult(response.choices().getFirst().message().content(),
+                    usage == null ? 0 : Math.max(usage.promptTokens(), 0),
+                    usage == null ? 0 : Math.max(usage.completionTokens(), 0));
         } catch (RestClientResponseException exception) {
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "对话模型服务调用失败", exception);
         } catch (org.springframework.web.client.ResourceAccessException exception) {
@@ -57,12 +65,16 @@ public class QwenChatGateway implements ChatCompletionGateway {
         }
     }
 
-    record ChatResponse(List<Choice> choices) {
+    record ChatResponse(List<Choice> choices, Usage usage) {
     }
 
     record Choice(Message message) {
     }
 
     record Message(String content) {
+    }
+
+    record Usage(@com.fasterxml.jackson.annotation.JsonProperty("prompt_tokens") int promptTokens,
+            @com.fasterxml.jackson.annotation.JsonProperty("completion_tokens") int completionTokens) {
     }
 }
