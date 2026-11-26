@@ -84,7 +84,7 @@ management:
 info:
   application:
     name: TeamMind
-    phase: Phase 7 - Evaluation
+    phase: Phase 8 - Full Stack Console
 
 teammind:
   qdrant:

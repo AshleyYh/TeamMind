@@ -1,10 +1,10 @@
-# TeamMind 当前架构说明（Phase 7）
+# TeamMind 当前架构说明（Phase 8）
 
 ## 目标与边界
 
-Phase 7 在 Phase 6 可观测性之上实现评测体系：任务识别、RAG 检索和长期记忆三类数据集，Recall@K、MRR、NDCG@K、任务准确率、工具命中率、引用精确率/召回率和答案关键词覆盖率，以及评测运行、逐用例结果和 Markdown 报告持久化。
+Phase 8 完成 Vue 3 + TypeScript + Element Plus 控制台和前后端联调：知识库、文档上传与状态、SSE 多轮对话、引用证据、Agent 执行步骤、Trace/Span 监控、长期记忆管理、评测中心和 Dashboard 统计。
 
-本阶段仍不包含登录认证和前端业务页面。`ownerId` 仍只是开发期归属参数，不是身份认证。内置数据集是小规模示例，真实效果评测需要按企业知识库替换数据。
+本阶段仍不包含真实登录认证。前端登录页只保存开发期 `ownerId`，所有后端接口仍以 `ownerId` 做资源隔离。内置评测数据集是小规模示例，真实效果评测需要按企业知识库替换数据。
 
 ## 模块与依赖
 
@@ -268,6 +268,25 @@ GET  /api/v1/evaluation/runs/{runId}/report
 
 每次运行保存 `ai_evaluation_run`（状态、数据集 hash、策略、聚合指标、报告、错误）和 `ai_evaluation_case`（期望、实际、指标、耗时、错误）。运行 ID 为 32 位十六进制，报告以 Markdown 返回。评测运行同步执行，适合受控环境的小规模对比。
 
+## 前端控制台
+
+```text
+team-mind-ui/
+  src/api/          Axios 客户端、API 类型、POST SSE 解析
+  src/composables/  localStorage 开发会话
+  src/layouts/      侧边栏 + 顶栏控制台布局
+  src/views/        工作台、知识库、文档、对话、Trace、记忆、评测、登录
+  src/styles/       主题、Markdown、聊天、Trace、评测样式
+  src/router/       路由和开发模式守卫
+```
+
+- 开发服务器 `5173` 把 `/api` 代理到后端 `8080`。
+- SSE 使用 `fetch` + `ReadableStream` 手动解析，因为 `EventSource` 不支持 POST。
+- 对话页消费 `start/task/step/answer_delta/done/error` 事件，渲染 Markdown、代码块、引用证据、执行步骤和 Token。
+- Trace 页展示 Span、耗时、输入/输出 Token、错误节点和 Evidence。
+- 评测页支持任务识别、RAG 多策略和记忆评测，并可查看历史运行与 Markdown 报告。
+- 登录页是开发模式占位，没有密码、Token 或服务端会话。
+
 ## 已知限制
 
 - 真实 Qwen Function Calling、流式接口、摘要和记忆提取尚未用付费配额验收，自动化测试使用本地 HTTP 替身。
@@ -282,4 +301,7 @@ GET  /api/v1/evaluation/runs/{runId}/report
 - RAG 评测默认不调用对话模型；答案/引用质量评测需要显式开启并消耗配额。
 - 评测同步执行，大数据集可能长时间占用请求；没有统计显著性、置信区间和前端评测页面。
 - 记忆评测基于当前用户已有 ACTIVE 记忆，会更新命中记忆的 `lastUsedAt`，没有独立评测沙箱。
+- 前端没有单元测试和端到端自动化测试，当前通过 `vue-tsc` 和 `vite build` 验证；真实联调需要完整基础设施。
+- Element Plus 全量引入使主包较大；后续可使用按需引入和 manualChunks 优化。
+- 前端登录页只是开发模式 `ownerId` 入口，没有真实认证和权限控制。
 - SSE 连接可能受反向代理空闲超时影响，生产部署需要配置代理缓冲和超时。

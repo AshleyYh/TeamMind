@@ -2,5 +2,29 @@
   "name": "team-mind-ui",
   "version": "1.0.0",
   "private": true,
-  "description": "Vue 3 workspace reserved for Phase 8. No frontend implementation in Phase 1."
+  "type": "module",
+  "description": "TeamMind 企业研发知识库 Agent 控制台",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "axios": "^1.7.9",
+    "dompurify": "^3.2.3",
+    "element-plus": "^2.9.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.4",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.2.0"
+  }
 }

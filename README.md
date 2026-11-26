@@ -1,10 +1,10 @@
 # TeamMind
 
-企业级研发知识库 Agent 平台。当前完成 **Phase 7：评测体系**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、短期/长期记忆、全链路 Trace 和量化评测的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要、长期记忆、Trace/Span，以及 Recall@K、MRR、NDCG、任务准确率和引用质量评测。
+企业级研发知识库 Agent 平台。当前完成 **Phase 8：前端完善与整体联调**，已经具备从文档入库到 Agent 工具调用、带真实引用问答、SSE 流式输出、短期/长期记忆、全链路 Trace、量化评测和 Vue 3 控制台的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环、SSE 流式回答、增量摘要、长期记忆、Trace/Span、Recall@K/MRR/NDCG 评测，以及知识库/文档/对话/证据/Agent 监控/记忆/评测页面。
 
-登录认证和前端业务页面尚未实现。
+真实登录认证尚未实现，前端使用开发期 `ownerId` 入口。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 7 验收记录](docs/phase7-verification.md)，Phase 6 历史验收见 [Phase 6 验收记录](docs/phase6-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 8 验收记录](docs/phase8-verification.md)，Phase 7 历史验收见 [Phase 7 验收记录](docs/phase7-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 当前进度
 
@@ -17,7 +17,7 @@
 | Phase 5 | ✅ 完成 | Redis 短期会话记忆、上下文裁剪、增量摘要、长期记忆提取/确认/更新/失效/检索、记忆来源追溯、Agent 连续对话 |
 | Phase 6 | ✅ 完成 | Trace/Span、Agent 决策与工具节点、RAG 检索节点、Token/耗时统计、失败节点、Trace 查询接口 |
 | Phase 7 | ✅ 完成 | 任务识别/RAG/记忆数据集、Recall@K、MRR、NDCG、任务准确率、工具命中率、引用与答案质量、评测运行持久化和 Markdown 报告 |
-| Phase 8 | ⏳ 未开始 | 前端知识库/文档/对话/证据/Agent 监控/评测页面和整体联调 |
+| Phase 8 | ✅ 完成 | Vue 3 + TypeScript 控制台、开发模式登录、知识库/文档/SSE 对话/证据/Agent 监控/长期记忆/评测页面、Dashboard 统计接口和前后端联调配置 |
 
 ## 已实现功能
 
@@ -71,7 +71,7 @@ team-mind-memory         Redis 短期会话、增量摘要存储、长期记忆�
 team-mind-common         统一响应、错误码、业务异常
 team-mind-system         用户与系统模块（Phase 1 骨架）
 team-mind-evaluation     任务/RAG/记忆数据集、Recall@K/MRR/NDCG、评测运行与 Markdown 报告
-team-mind-ui             Vue 3 + TypeScript 前端工作区（Phase 8 实现，非 Maven 模块）
+team-mind-ui             Vue 3 + TypeScript + Element Plus 控制台（非 Maven 模块）
 ```
 
 ## 环境要求
@@ -157,6 +157,18 @@ java -jar team-mind-web/target/team-mind-web-1.0.0-SNAPSHOT.jar --spring.profile
 IDEA 的环境变量填写位置：`Run → Edit Configurations → 选中配置 → Environment variables` 右侧的编辑按钮，格式为 `KEY=VALUE`，多个变量用 `;` 分隔。这些值保存在 `.idea/workspace.xml`，该目录已被 `.gitignore` 忽略；团队共享机器上建议安装 **EnvFile** 插件，直接加载 `.env`，避免把密钥写进 IDE 配置。
 
 macOS 从 Dock 启动的 IDEA 不会继承终端 `~/.zshrc` 中的 `export`，因此**在终端里 export 后再启动打包方式有效，但对 IDEA 图形界面无效**，必须在运行配置里单独填写，或改用 EnvFile 插件。
+
+### 第三步：启动前端控制台（可选）
+
+后端启动后，在另一个终端执行：
+
+```bash
+cd team-mind-ui
+npm install --registry=https://registry.npmmirror.com
+npm run dev
+```
+
+打开 <http://localhost:5173>。开发服务器把 `/api` 代理到 `http://localhost:8080`；登录页使用开发期 `ownerId`（local profile 默认用户为 1），不是真实身份认证。
 
 ### 使用本地 Ollama 模型（可选）
 
@@ -259,6 +271,12 @@ MyBatis-Plus 生成的是 19 位雪花编号，超过了 JavaScript 的 `Number.
 | POST | `/api/v1/memories/{id}/confirm` | 确认 DRAFT，变为 ACTIVE | Path：`id`；Query：`ownerId` |
 | POST | `/api/v1/memories/{id}/invalidate` | 使记忆失效 | Path：`id`；Query：`ownerId` |
 | DELETE | `/api/v1/memories/{id}` | 逻辑删除记忆并标记失效 | Path：`id`；Query：`ownerId` |
+
+### 首页统计
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/api/v1/dashboard/stats` | 汇总知识库、文档、会话、记忆、Trace、评测数量和最近执行 |
 
 ### 健康检查
 
@@ -534,7 +552,16 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Ph
 ./mvnw test                 # 只运行单元测试
 ```
 
-默认单元与上下文测试共 **159 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议和 Token 解析、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、Trace/Span 记录与查询、Recall@K/MRR/NDCG、数据集加载、三类评测服务、评测报告持久化、会话/记忆/评测 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
+默认单元与上下文测试共 **162 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议和 Token 解析、Redis 会话读写与裁剪、增量摘要、长期记忆确认/失效/检索、Trace/Span 记录与查询、Recall@K/MRR/NDCG、数据集加载、三类评测服务、评测报告持久化、Dashboard 统计、会话/记忆/评测/追踪 Web 接口，以及原有 RAG 和 Web 接口。真实 Qwen、Reranker、PostgreSQL/Redis/Qdrant 集成验收仍需单独执行。
+
+前端：
+
+```bash
+cd team-mind-ui
+npm install --registry=https://registry.npmmirror.com
+npm run typecheck
+npm run build
+```
 
 真实基础设施集成测试会使用独立端口和临时存储，结束后自动删除：
 
@@ -562,7 +589,9 @@ Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答；Ph
 - 内置评测数据集只是小规模示例，需要按真实知识库替换相关文档名和关键词；RAG 评测默认不调用对话模型，答案/引用质量评测需要显式开启并消耗配额。
 - 评测运行当前同步执行，大数据集可能长时间占用请求；没有统计显著性、置信区间和前端评测页面，后者属于 Phase 8。
 - 记忆评测基于当前用户已有 ACTIVE 记忆，会更新命中记忆的 `lastUsedAt`；没有独立的评测沙箱数据。
-- 没有登录认证和前端业务页面，这些属于后续阶段。
+- 前端登录页只是开发期 `ownerId` 入口，没有密码、Token、权限和路由鉴权服务；不能部署到公网。
+- 前端没有单元测试和端到端自动化测试，当前通过 `vue-tsc` 和 `vite build` 验证类型与构建；真实联调需要启动 PostgreSQL/Redis/Qdrant 和后端。
+- Element Plus 全量引入使主包较大；后续可用 unplugin 按需引入和 manualChunks 优化。生产部署需要配置 `/api` 反向代理并关闭 SSE 缓冲。
 
 ## 常见问题
 
