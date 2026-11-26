@@ -1,10 +1,10 @@
 # TeamMind
 
-企业级研发知识库 Agent 平台。当前完成 **Phase 3：高级 RAG**，已经具备从文档入库到带真实引用问答的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board 证据回溯。
+企业级研发知识库 Agent 平台。当前完成 **Phase 4：ReAct Agent**，已经具备从文档入库到 Agent 工具调用、带真实引用问答和 SSE 流式输出的完整链路：文档解析与分块、Qwen Embedding、Qdrant 向量检索、BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、Reranker 重排、有效版本过滤、Evidence Board、规则预处理、结构化任务理解、Tool Registry、Function Calling、ReAct 执行循环和 SSE 流式回答。
 
-Agent 任务规划、长期记忆、完整链路追踪、量化评测和前端业务页面尚未实现。
+长期记忆、完整链路追踪、量化评测、登录认证和前端业务页面尚未实现。
 
-详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 3 验收记录](docs/phase3-verification.md)，接口级逐项验证见 [Phase 3 功能人工验收手册](docs/phase3-manual-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+详细设计见 [架构说明](docs/architecture.md)，阶段验收见 [Phase 4 验收记录](docs/phase4-verification.md)，Phase 3 历史验收见 [Phase 3 验收记录](docs/phase3-verification.md)，原始需求见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 当前进度
 
@@ -13,7 +13,8 @@ Agent 任务规划、长期记忆、完整链路追踪、量化评测和前端�
 | Phase 1 | ✅ 完成 | 多模块工程骨架、PostgreSQL/Redis/Qdrant 基础设施、Flyway 迁移、统一响应与异常处理、健康检查、Swagger 文档 |
 | Phase 2 | ✅ 完成 | 知识库 CRUD、文档上传与异步处理、PDF/DOCX/TXT/Markdown 解析、文本分块与重叠、Embedding 入库、基础 RAG 问答与引用 |
 | Phase 3 | ✅ 完成 | BM25 关键词召回、Dense + BM25 并行检索、RRF 融合、BGE/Qwen Reranker、文档版本过滤、四种检索策略、Evidence Board |
-| Phase 4+ | ⏳ 未开始 | ReAct Agent、短期/长期记忆、完整 Trace/Span、量化评测、SSE 流式输出、登录认证、前端业务页面 |
+| Phase 4 | ✅ 完成 | 规则预处理、结构化任务理解、任务分类、Tool Registry、Function Calling、ReAct 执行循环、工具异常与超时、执行限制、SSE 流式回答 |
+| Phase 5+ | ⏳ 未开始 | 短期/长期记忆、完整 Trace/Span、量化评测、登录认证、前端业务页面 |
 
 ## 已实现功能
 
@@ -36,6 +37,12 @@ Agent 任务规划、长期记忆、完整链路追踪、量化评测和前端�
 
 **Evidence Board**：每次检索或问答返回 32 位十六进制 `traceId`，并持久化最终 Top K 证据快照。Evidence 保存原文、页码、版本、两路排名、融合/重排分数、是否重排和是否被回答实际引用。历史证据采用不可变快照，文档重处理或删除后仍可追溯。
 
+**Agent 对话**：先做规则预处理和 Qwen 结构化任务理解，把问题分类为 `KNOWLEDGE_QA`、`HISTORY_QUERY`、`DOCUMENT_SEARCH`、`GENERAL_CHAT` 或 `UNKNOWN`。随后进入 ReAct 循环，通过 Function Calling 在受控 Tool Registry 中选择 `knowledgeSearch`、`documentSearch`、`getDocumentDetail`、`historyMemorySearch` 和 `getConversationHistory`。工具参数只能收窄请求已授权的知识库/文档范围；未知工具、非法参数、业务异常、工具超时和连续失败都会转换为 Observation，不向模型泄漏内部信息。
+
+执行边界由 `AGENT_MAX_ITERATIONS`、`AGENT_MAX_TOOL_CALLS`、`AGENT_MAX_CONSECUTIVE_FAILURES`、`AGENT_EXECUTION_TIMEOUT` 和 `AGENT_TOOL_TIMEOUT` 控制。达到任一限制后仍会生成最终答案，并在 `termination` 和 `warnings` 中说明原因。非流式接口返回完整 `taskUnderstanding`、`steps`、`citations` 和 `usage`；`POST /api/v1/chat/stream` 通过 SSE 推送 `start`、`task`、`step`、`answer_delta`、`done` 和 `error` 事件。
+
+模型返回的越界引用编号会被移除：非流式与流式 Agent 回答使用同一套引用过滤器，避免把不存在的证据编号展示给用户。`historyMemorySearch` 和 `getConversationHistory` 是 Phase 5 前的降级实现，只使用本次请求携带的历史，不伪造长期记忆。
+
 **基础设施与可观测性**：PostgreSQL 保存业务元数据、分块和检索词元；Qdrant 保存向量；Redis 已完成连接与健康检查，为后续会话和缓存预留；Actuator 提供 liveness/readiness 健康检查，readiness 会检查数据库、Redis 和 Qdrant。
 
 ## 技术基线
@@ -46,7 +53,7 @@ Java 21、Spring Boot 3.5.7、Maven 3.9.11、PostgreSQL 16、Redis 7、Qdrant 1.
 
 ```text
 team-mind-web            Controller、启动类、应用配置、Swagger 配置
-team-mind-ai             Qwen 对话/Embedding 网关、RAG 问答编排、提示词
+team-mind-ai             Qwen 对话/Embedding 网关、RAG 问答编排、Agent 任务理解/工具/ReAct、提示词
 team-mind-knowledge      知识库、文档、分块、解析器、向量库、BM25、RRF、重排
 team-mind-observability  轻量 RAG Trace、Evidence Board、Qdrant 健康检查
 team-mind-common         统一响应、错误码、业务异常
@@ -193,12 +200,14 @@ MyBatis-Plus 生成的是 19 位雪花编号，超过了 JavaScript 的 `Number.
 | POST | `/api/v1/documents/{id}/reprocess` | 重新解析、分块、向量化并补齐 BM25 词元 | Path：`id`；Query：`ownerId` |
 | DELETE | `/api/v1/documents/{id}` | 删除文档并清理分块与向量 | Path：`id`；Query：`ownerId` |
 
-### 检索、问答与证据
+### 检索、问答、Agent 与证据
 
 | 方法 | 路径 | 作用 | 主要参数 |
 | --- | --- | --- | --- |
 | POST | `/api/v1/retrieval/search` | 按指定策略独立检索，不调用对话模型 | Body：`query`、`knowledgeBaseIds`、`ownerId`、`topK`、`strategy` |
-| POST | `/api/v1/chat/completions` | 知识库问答，返回答案、真实引用、`traceId` 和策略 | Body：`message`、`knowledgeBaseIds`、`ownerId`、`topK`、`strategy` |
+| POST | `/api/v1/chat/completions` | 直接 RAG 知识库问答，返回答案、真实引用、`traceId` 和策略 | Body：`message`、`knowledgeBaseIds`、`ownerId`、`topK`、`strategy` |
+| POST | `/api/v1/agent/chat` | Agent 非流式对话，返回任务理解、执行步骤、引用和终止原因 | Body：`message`、`knowledgeBaseIds`、`ownerId`、`topK`、`conversationId`、`history`、`documentIds` |
+| POST | `/api/v1/chat/stream` | Agent SSE 流式对话，推送任务、步骤、答案增量和完成事件 | Body 同上；响应 `text/event-stream` |
 | GET | `/api/v1/evidence/{traceId}` | 查询一次请求的 Evidence 证据快照 | Path：`traceId`；Query：`ownerId` |
 
 ### 健康检查
@@ -270,6 +279,34 @@ curl -X POST http://localhost:8080/api/v1/retrieval/search \
 curl 'http://localhost:8080/api/v1/evidence/替换为traceId?ownerId=1'
 ```
 
+Agent 非流式对话会先做任务理解，再按需调用工具：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/agent/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "message":"订单模块的最大连接数是多少？",
+    "knowledgeBaseIds":[知识库ID],
+    "ownerId":1,
+    "topK":5,
+    "conversationId":"conv_001",
+    "history":[]
+  }'
+```
+
+响应中的 `taskType` 表示任务分类，`steps` 展示 `THOUGHT/ACTION/OBSERVATION` 过程，`termination` 表示是否正常完成或触发了轮数、工具次数、超时、连续失败等限制，`warnings` 记录降级和越界引用移除等信息。
+
+SSE 流式对话：
+
+```bash
+curl -N -X POST http://localhost:8080/api/v1/chat/stream \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -d '{"message":"订单模块的最大连接数是多少？","knowledgeBaseIds":[知识库ID],"ownerId":1}'
+```
+
+事件依次为 `start`、`task`、若干 `step`、`answer_delta` 和 `done`；失败时返回 `error` 事件。`historyMemorySearch` 当前只会返回 Phase 5 未启用的提示，Agent 会继续使用知识库检索或说明限制。
+
 **升级注意：** Phase 2 已入库文档需要逐篇调用重处理接口，补齐 BM25 检索词元后才能参与关键词召回。
 
 ## 配置说明
@@ -326,6 +363,21 @@ Spring Boot 的覆盖顺序为：命令行参数 > 环境变量 > 激活 profile
 | `RAG_STRATEGY` | `HYBRID_RERANK` | 默认检索策略 |
 | `RAG_RRF_K` / `RAG_MAX_TERM_COUNT` / `RAG_PARALLEL_TIMEOUT` | `60` / `64` / `15s` | RRF 常数、BM25 最大词元数、并行检索超时 |
 
+**Agent 执行边界**：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `AGENT_MAX_ITERATIONS` | `5` | 最大模型推理轮数 |
+| `AGENT_MAX_TOOL_CALLS` | `8` | 单次请求最大工具调用总数 |
+| `AGENT_MAX_CONSECUTIVE_FAILURES` | `3` | 连续工具失败上限，达到后停止调用工具 |
+| `AGENT_MAX_EVIDENCE` | `12` | 单次请求最多保留的证据条数 |
+| `AGENT_MAX_HISTORY_MESSAGES` | `20` | 请求历史消息上限 |
+| `AGENT_MAX_QUESTION_LENGTH` | `4000` | 问题长度上限 |
+| `AGENT_MAX_OBSERVATION_CHARS` | `6000` | 工具观察字符上限 |
+| `AGENT_MAX_CHUNK_CHARS` | `1200` | 单条证据进入提示词的字符上限 |
+| `AGENT_EXECUTION_TIMEOUT` | `90s` | Agent 整体执行超时 |
+| `AGENT_TOOL_TIMEOUT` | `20s` | 单工具执行超时，必须不大于整体超时 |
+
 **Ollama 模式**：
 
 | 变量 | 默认值 | 说明 |
@@ -352,7 +404,7 @@ Flyway 在应用启动时自动执行 `team-mind-web/src/main/resources/db/migra
 - `V2__add_phase2_constraints.sql`：Phase 2 约束与索引
 - `V3__add_phase3_advanced_rag.sql`：BM25 检索词元、生成式 `tsvector`、GIN 索引，以及 Evidence 快照字段
 
-已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V4__*.sql`。
+Phase 4 复用现有 `ai_trace` 记录 Agent 状态、任务类型和回答，没有新增数据库迁移。已应用的迁移脚本不要修改，否则会触发 Flyway 校验失败；需要变更结构时新增 `V4__*.sql`。
 
 ## 构建与测试
 
@@ -361,21 +413,26 @@ Flyway 在应用启动时自动执行 `team-mind-web/src/main/resources/db/migra
 ./mvnw test                 # 只运行单元测试
 ```
 
+默认单元与上下文测试共 **94 项**，覆盖规则预处理、任务理解、Tool Registry、五个 Agent 工具、ReAct 多工具与终止条件、SSE、引用过滤、Qwen Function Calling/流式协议、原有 RAG 和 Web 接口。真实 Qwen、Reranker 和 PostgreSQL/Qdrant 集成验收仍需单独执行。
+
 真实基础设施集成测试会使用独立端口和临时存储，结束后自动删除：
 
 ```bash
 ./scripts/verify-infrastructure.sh
 ```
 
-该脚本启动 PostgreSQL `15432`、Redis `16379`、Qdrant `16333/16334`，运行基础设施连接、Flyway、HTTP 健康接口以及“PDF 上传 → 分块 → 向量入库 → BM25/RRF/重排 → 带引用回答 → Evidence → 删除清理”的 Phase 3 全链路测试。外部模型在集成测试中替换为本地确定性实现，不消耗 Qwen 配额。
+该脚本启动 PostgreSQL `15432`、Redis `16379`、Qdrant `16333/16334`，运行基础设施连接、Flyway、HTTP 健康接口以及“PDF 上传 → 分块 → 向量入库 → BM25/RRF/重排 → 带引用回答 → Evidence → 删除清理”的 Phase 3 全链路测试。外部模型在集成测试中替换为本地确定性实现，不消耗 Qwen 配额。Agent 的 Function Calling 和 SSE 真实模型验收步骤见 [Phase 4 验收记录](docs/phase4-verification.md)。
 
 ## 已知限制
 
 - 尚未接入身份认证，请求中的 `ownerId` 只是开发期归属参数，任意调用者都可以伪造，**不能视为安全认证**，当前版本只适合受控开发环境。
 - 没有文件病毒扫描、接口限流、对象存储和模型计费监控；上传文件保存在本地磁盘。
 - 只支持 PDF、DOCX、TXT 和 Markdown；图片 OCR、Excel、PPT 等格式尚未支持。
-- Ollama profile 只覆盖对话与 Embedding，默认的 `HYBRID_RERANK` 仍需要 DashScope Reranker 或兼容接口；不配置时可改用 `HYBRID`。
-- 没有 SSE 流式输出、Agent 工具调用、短期/长期记忆、完整 Span/Token 追踪和前端业务页面，这些属于后续阶段。
+- Ollama profile 只覆盖对话与 Embedding，默认的 `HYBRID_RERANK` 仍需要 DashScope Reranker 或兼容接口；不配置时可改用 `HYBRID`。Agent 的 Function Calling 和流式输出需要所选对话模型支持 OpenAI 兼容的 `tools` 与 `stream` 协议。
+- `historyMemorySearch` 是 Phase 5 占位实现，`getConversationHistory` 只读取请求携带的 `history`；服务端尚未持久化会话。
+- Agent 执行步骤目前通过响应和 SSE 返回，尚未写入独立 Span/工具调用表；完整 Trace、Token 统计和前端执行监控属于 Phase 6 和 Phase 8。
+- `documentSearch` 受底层检索能力限制，采用扩大候选集后按文档 ID 过滤的近似实现，大文档集下可能遗漏候选集之外的证据。
+- 没有短期/长期记忆、完整 Span/Token 追踪、量化评测和前端业务页面，这些属于后续阶段。
 
 ## 常见问题
 

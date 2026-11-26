@@ -1,5 +1,7 @@
 package com.teammind.ai.rag;
 
+import com.teammind.ai.api.Citation;
+import com.teammind.ai.api.CitationValidator;
 import com.teammind.ai.model.ChatCompletionGateway;
 import com.teammind.ai.prompt.RagPrompts;
 import com.teammind.common.api.ErrorCode;
@@ -13,17 +15,12 @@ import com.teammind.observability.application.RagTraceService;
 import com.teammind.observability.domain.RagTrace;
 import org.springframework.stereotype.Service;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 public class RagAnswerService {
-    private static final Pattern CITATION_PATTERN = Pattern.compile("\\[(\\d+)]");
-
     private final KnowledgeSearchService searchService;
     private final ChatCompletionGateway chatGateway;
     private final EvidenceRecorder evidenceRecorder;
@@ -62,7 +59,7 @@ public class RagAnswerService {
             // 引用编号由服务端固定生成，不接受模型传入的文档 ID 或任意引用位置。
             String answer = chatGateway.generate(RagPrompts.SYSTEM_PROMPT,
                     RagPrompts.buildUserContent(query, retrieval.chunks()));
-            Set<Integer> indexes = validateCitationIndexes(answer, retrieval.chunks().size());
+            Set<Integer> indexes = CitationValidator.validate(answer, retrieval.chunks().size());
             List<Citation> citations = java.util.stream.IntStream.range(0, retrieval.chunks().size())
                     .mapToObj(index -> toCitation(index + 1, retrieval.chunks().get(index))).toList();
             evidenceRecorder.markCitations(traceId, indexes.stream()
@@ -76,26 +73,6 @@ public class RagAnswerService {
         }
     }
 
-    private Set<Integer> validateCitationIndexes(String answer, int evidenceCount) {
-        Set<Integer> indexes = new HashSet<>();
-        Matcher matcher = CITATION_PATTERN.matcher(answer);
-        while (matcher.find()) {
-            int index;
-            try {
-                index = Integer.parseInt(matcher.group(1));
-            } catch (NumberFormatException exception) {
-                throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE,
-                        "模型返回了不存在的证据引用，已拒绝本次回答");
-            }
-            if (index < 1 || index > evidenceCount) {
-                throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE,
-                        "模型返回了不存在的证据引用，已拒绝本次回答");
-            }
-            indexes.add(index);
-        }
-        return indexes;
-    }
-
     private Citation toCitation(int index, RetrievedChunk chunk) {
         return new Citation(index, chunk.chunkId(), chunk.documentId(), chunk.knowledgeBaseId(),
                 chunk.documentName(), chunk.documentVersion(), chunk.pageNumber(), chunk.content(), chunk.score(),
@@ -104,11 +81,5 @@ public class RagAnswerService {
     }
 
     public record RagAnswer(String answer, List<Citation> citations, String traceId, SearchStrategy strategy) {
-    }
-
-    public record Citation(int index, Long chunkId, Long documentId, Long knowledgeBaseId,
-            String documentName, Integer documentVersion, Integer pageNumber, String content, double score,
-            Integer denseRank, Integer bm25Rank, Double denseScore, Double bm25Score,
-            Double rrfScore, Double rerankScore) {
     }
 }

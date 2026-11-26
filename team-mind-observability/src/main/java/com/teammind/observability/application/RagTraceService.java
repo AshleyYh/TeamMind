@@ -30,9 +30,14 @@ public class RagTraceService {
     }
 
     public void updateStrategy(Long id, com.teammind.knowledge.api.SearchStrategy strategy) {
+        updateStrategy(id, strategy.name());
+    }
+
+    /** Agent 需要记录任务类型等非检索策略信息，因此提供字符串重载。 */
+    public void updateStrategy(Long id, String strategy) {
         RagTrace update = new RagTrace();
         update.setId(id);
-        update.setStrategy(strategy.name());
+        update.setStrategy(strategy);
         traceMapper.updateById(update);
     }
 

@@ -84,7 +84,7 @@ management:
 info:
   application:
     name: TeamMind
-    phase: Phase 3 - Advanced RAG
+    phase: Phase 4 - ReAct Agent
 
 teammind:
   qdrant:
@@ -131,6 +131,20 @@ teammind:
       chat-model: ${QWEN_CHAT_MODEL:qwen-plus}
       connect-timeout: ${QWEN_CONNECT_TIMEOUT:5s}
       read-timeout: ${QWEN_READ_TIMEOUT:60s}
+  agent:
+    # ReAct 最大模型轮数；每次工具结果回填后重新决策算一轮。
+    max-iterations: ${AGENT_MAX_ITERATIONS:5}
+    # 单次请求最多执行的工具调用总数，包含同一轮的并行工具调用。
+    max-tool-calls: ${AGENT_MAX_TOOL_CALLS:8}
+    # 连续失败达到该值后停止调用工具，改为基于已有观察生成答案。
+    max-consecutive-failures: ${AGENT_MAX_CONSECUTIVE_FAILURES:3}
+    max-evidence: ${AGENT_MAX_EVIDENCE:12}
+    max-history-messages: ${AGENT_MAX_HISTORY_MESSAGES:20}
+    max-question-length: ${AGENT_MAX_QUESTION_LENGTH:4000}
+    max-observation-chars: ${AGENT_MAX_OBSERVATION_CHARS:6000}
+    max-chunk-chars: ${AGENT_MAX_CHUNK_CHARS:1200}
+    execution-timeout: ${AGENT_EXECUTION_TIMEOUT:90s}
+    tool-timeout: ${AGENT_TOOL_TIMEOUT:20s}
 
 logging:
   level:

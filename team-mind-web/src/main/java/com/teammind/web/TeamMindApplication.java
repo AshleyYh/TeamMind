@@ -1,5 +1,6 @@
 package com.teammind.web;
 
+import com.teammind.ai.agent.config.AgentProperties;
 import com.teammind.ai.config.QwenProperties;
 import com.teammind.knowledge.config.DocumentProperties;
 import com.teammind.knowledge.config.QdrantKnowledgeProperties;
@@ -14,7 +15,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 @SpringBootApplication(scanBasePackages = "com.teammind")
 @MapperScan("com.teammind.**.mapper")
 @EnableConfigurationProperties({QdrantProperties.class, DocumentProperties.class,
-        QdrantKnowledgeProperties.class, RetrievalProperties.class, RerankerProperties.class, QwenProperties.class})
+        QdrantKnowledgeProperties.class, RetrievalProperties.class, RerankerProperties.class,
+        QwenProperties.class, AgentProperties.class})
 public class TeamMindApplication {
 
     public static void main(String[] args) {

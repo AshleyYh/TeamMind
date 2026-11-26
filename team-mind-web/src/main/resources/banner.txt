@@ -4,4 +4,4 @@
    | |  __/ (_| | | | | | || |  | | | | | | (_| |
    |_|\___|\__,_|_| |_| |_||_|  |_|_|_| |_|\__,_|
 
-:: TeamMind :: Phase 1 Foundation :: Spring Boot ${spring-boot.version} ::
+:: TeamMind :: Phase 4 - ReAct Agent :: Spring Boot ${spring-boot.version} ::
