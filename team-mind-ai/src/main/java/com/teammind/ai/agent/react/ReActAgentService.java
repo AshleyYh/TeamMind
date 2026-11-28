@@ -174,6 +174,7 @@ public class ReActAgentService {
         TerminationReason termination = null;
         int toolCallCount = 0;
         int consecutiveFailures = 0;
+        Set<String> executedToolCalls = new java.util.HashSet<>();
         ModelUsage usage = conversation.usage().plus(task.usage());
 
         for (int iteration = 1; iteration <= properties.maxIterations(); iteration++) {
@@ -258,6 +259,18 @@ public class ReActAgentService {
                 }
                 addStep(steps, observer, AgentStepType.ACTION, call.name(),
                         abbreviate(call.arguments(), STEP_CONTENT_CHARS), true, 0);
+                String callKey = call.name() + "\u0000"
+                        + (call.arguments() == null ? "" : call.arguments().trim());
+                if (!executedToolCalls.add(callKey)) {
+                    // 模型偶尔会原样重试同一个调用；重复执行既拿不到新结果，还会耗尽失败上限。
+                    String duplicateMessage = "未执行：相同工具和参数已经调用过，重复调用不会得到新结果。"
+                            + "请调整参数或直接给出最终答案。";
+                    addStep(steps, observer, AgentStepType.OBSERVATION, call.name(), duplicateMessage, false, 0);
+                    messages.add(AgentMessage.tool(call.id(), duplicateMessage));
+                    traceService.failSpan(toolSpan, "DUPLICATE_TOOL_CALL", duplicateMessage);
+                    consecutiveFailures++;
+                    continue;
+                }
                 ToolExecution execution = executeTool(call, toolContext, deadline);
                 addStep(steps, observer, AgentStepType.OBSERVATION, call.name(),
                         abbreviate(execution.result().content(), STEP_CONTENT_CHARS),

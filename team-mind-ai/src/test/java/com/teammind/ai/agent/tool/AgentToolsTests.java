@@ -30,7 +30,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentToolsTests {
@@ -85,7 +88,9 @@ class AgentToolsTests {
     }
 
     @Test
-    void 知识库工具不能扩大请求范围() {
+    void 越界知识库编号被忽略并回退到请求范围() {
+        when(searchService.searchWithTrace(anyString(), anyList(), anyLong(), anyInt(), any(), anyString()))
+                .thenReturn(new RetrievalResult("trace", SearchStrategy.HYBRID, List.of()));
         KnowledgeSearchTool tool = new KnowledgeSearchTool(searchService, properties);
 
         ToolResult outOfScope = tool.execute(context(List.of(1L), new EvidenceCollector(5)),
@@ -93,10 +98,32 @@ class AgentToolsTests {
         ToolResult noScope = tool.execute(context(List.of(), new EvidenceCollector(5)),
                 Map.of("query", "连接池"));
 
-        assertThat(outOfScope.success()).isFalse();
-        assertThat(outOfScope.content()).contains("超出当前访问范围");
+        assertThat(outOfScope.success()).isTrue();
+        assertThat(outOfScope.content()).contains("已忽略", "2", "没有检索到");
+        assertThat(outOfScope.metadata()).containsEntry("knowledgeBaseIds", List.of(1L));
+        assertThat(outOfScope.metadata()).containsEntry("ignoredKnowledgeBaseIds", List.of(2L));
+        verify(searchService).searchWithTrace(eq("连接池"), eq(List.of(1L)), eq(1L), eq(5), isNull(),
+                eq("trace"));
         assertThat(noScope.success()).isFalse();
         assertThat(noScope.content()).contains("未指定可访问的知识库");
+    }
+
+    @Test
+    void 模型抄错十九位知识库编号时仍回退到请求范围() {
+        long allowed = 2125163621523984385L;
+        long typo = 2125163621523984400L;
+        when(searchService.searchWithTrace(anyString(), anyList(), anyLong(), anyInt(), any(), anyString()))
+                .thenReturn(new RetrievalResult("trace", SearchStrategy.HYBRID, List.of()));
+        KnowledgeSearchTool tool = new KnowledgeSearchTool(searchService, properties);
+
+        ToolResult result = tool.execute(context(List.of(allowed), new EvidenceCollector(5)),
+                Map.of("query", "系安全带 前排后排", "knowledgeBaseIds", List.of(typo)));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.metadata()).containsEntry("knowledgeBaseIds", List.of(allowed));
+        assertThat(result.metadata()).containsEntry("ignoredKnowledgeBaseIds", List.of(typo));
+        verify(searchService).searchWithTrace(eq("系安全带 前排后排"), eq(List.of(allowed)), eq(1L),
+                eq(5), isNull(), eq("trace"));
     }
 
     @Test

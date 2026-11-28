@@ -262,6 +262,25 @@ class ReActAgentServiceTests {
     }
 
     @Test
+    void 相同参数的重复工具调用不会重复执行() {
+        when(understandingService.understand(any())).thenReturn(task(TaskType.KNOWLEDGE_QA));
+        AgentToolCall repeated = call("call_1", "knowledgeSearch", "{\"query\":\"连接池\"}");
+        when(modelGateway.complete(any())).thenReturn(
+                response(null, repeated),
+                response(null, repeated),
+                response("基于已有观察回答。"));
+        when(toolRegistry.execute(anyString(), anyString(), any())).thenReturn(ToolResult.success("ok"));
+
+        AgentAnswer answer = service(properties(5, 8, 1, Duration.ofSeconds(2)))
+                .chat(request("最大连接数？", List.of(1L)));
+
+        assertThat(answer.termination()).isEqualTo(TerminationReason.TOOL_FAILURE_LIMIT);
+        assertThat(answer.steps()).filteredOn(step -> step.type() == AgentStepType.OBSERVATION)
+                .anyMatch(step -> step.content().contains("重复调用"));
+        verify(toolRegistry, org.mockito.Mockito.times(1)).execute(anyString(), anyString(), any());
+    }
+
+    @Test
     void 越界引用被移除并记录警告() {
         when(understandingService.understand(any())).thenReturn(task(TaskType.KNOWLEDGE_QA));
         when(modelGateway.complete(any())).thenReturn(

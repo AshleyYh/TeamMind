@@ -11,9 +11,9 @@ import com.teammind.knowledge.api.SearchStrategy;
 import com.teammind.knowledge.application.KnowledgeSearchService;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** 知识库检索工具：复用 Phase 3 的混合检索、重排和 Evidence 写入。 */
 @Component
@@ -65,19 +65,18 @@ public class KnowledgeSearchTool implements AgentTool {
             return ToolResult.failure("当前请求未指定可访问的知识库，无法执行知识库检索。",
                     Map.of("error", "NO_KNOWLEDGE_BASE"));
         }
-        List<Long> scope = requested == null || requested.isEmpty() ? allowed : requested;
-        if (!allowed.containsAll(scope)) {
-            // 模型只能收窄范围，不能通过工具参数访问请求范围外的知识库。
-            return ToolResult.failure("请求的知识库超出当前访问范围。", Map.of("error", "OUT_OF_SCOPE"));
-        }
+        List<Long> ignored = new ArrayList<>();
+        List<Long> scope = resolveScope(requested, allowed, ignored);
 
         RetrievalResult result = searchService.searchWithTrace(query, scope, context.ownerId(),
                 topK == null ? context.defaultTopK() : topK, strategy, context.traceId());
+        String scopeNotice = ignored.isEmpty() ? ""
+                : "已忽略不在访问范围内的知识库编号 " + ignored + "，按当前请求范围检索。\n";
         if (result.chunks().isEmpty()) {
-            return ToolResult.success("知识库中没有检索到与问题相关的证据。", Map.of(
-                    "count", 0, "strategy", result.strategy().name(), "knowledgeBaseIds", scope));
+            return ToolResult.success(scopeNotice + "知识库中没有检索到与问题相关的证据。",
+                    scopeMetadata(0, result, scope, ignored));
         }
-        StringBuilder content = new StringBuilder("知识库检索结果（")
+        StringBuilder content = new StringBuilder(scopeNotice).append("知识库检索结果（")
                 .append(result.strategy().name()).append("）：\n");
         int rendered = 0;
         for (RetrievedChunk chunk : result.chunks()) {
@@ -90,10 +89,35 @@ public class KnowledgeSearchTool implements AgentTool {
             rendered++;
         }
         if (rendered == 0) {
-            return ToolResult.success("知识库证据已达到本次请求上限，未加入新的证据。", Map.of(
-                    "count", 0, "strategy", result.strategy().name(), "knowledgeBaseIds", scope));
+            return ToolResult.success(scopeNotice + "知识库证据已达到本次请求上限，未加入新的证据。",
+                    scopeMetadata(0, result, scope, ignored));
         }
-        return ToolResult.success(content.toString(), Map.of(
-                "count", rendered, "strategy", result.strategy().name(), "knowledgeBaseIds", scope));
+        return ToolResult.success(content.toString(), scopeMetadata(rendered, result, scope, ignored));
+    }
+
+    /**
+     * 解析实际检索范围。模型可能把 19 位雪花 ID 抄错，越界编号既不能扩大权限，
+     * 也不应该让整次检索直接失败；这里丢弃越界编号并回退到请求允许范围。
+     */
+    private List<Long> resolveScope(List<Long> requested, List<Long> allowed, List<Long> ignored) {
+        if (requested == null || requested.isEmpty()) {
+            return allowed;
+        }
+        java.util.Set<Long> allowedSet = java.util.Set.copyOf(allowed);
+        List<Long> narrowed = requested.stream().distinct().filter(allowedSet::contains).toList();
+        requested.stream().distinct().filter(id -> !allowedSet.contains(id)).forEach(ignored::add);
+        return narrowed.isEmpty() ? allowed : narrowed;
+    }
+
+    private Map<String, Object> scopeMetadata(int count, RetrievalResult result, List<Long> scope,
+            List<Long> ignored) {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("count", count);
+        metadata.put("strategy", result.strategy().name());
+        metadata.put("knowledgeBaseIds", scope);
+        if (!ignored.isEmpty()) {
+            metadata.put("ignoredKnowledgeBaseIds", ignored);
+        }
+        return metadata;
     }
 }
